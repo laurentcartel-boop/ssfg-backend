@@ -89,6 +89,7 @@ async function register(req, res) {
       is_rookie: Boolean(is_rookie),
       index_value: 1.0,
       is_active: true,
+      must_change_password: true,
     });
 
     res.status(201).json({
@@ -101,8 +102,51 @@ async function register(req, res) {
   }
 }
 
+
+/**
+ * POST /api/auth/change-password
+ * Body: { current_password, new_password }
+ * (current_password optionnel si must_change_password)
+ */
+async function changePassword(req, res) {
+  try {
+    const { current_password, new_password } = req.body;
+    if (!new_password || new_password.length < 6) {
+      return res.status(400).json({ error: 'Nouveau mot de passe : 6 caractères minimum' });
+    }
+
+    const user = await User.findByPk(req.user.id);
+    if (!user) return res.status(404).json({ error: 'Utilisateur non trouvé' });
+
+    if (!user.must_change_password) {
+      if (!current_password) {
+        return res.status(400).json({ error: 'Mot de passe actuel requis' });
+      }
+      const valid = await user.validatePassword(current_password);
+      if (!valid) {
+        return res.status(401).json({ error: 'Mot de passe actuel incorrect' });
+      }
+    }
+
+    await user.update({
+      password_hash: new_password,
+      must_change_password: false,
+    });
+
+    res.json({
+      message: 'Mot de passe mis à jour',
+      user: user.toSafeJSON(),
+    });
+  } catch (err) {
+    console.error('changePassword error:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
 module.exports = {
   login,
   me,
   register,
+  changePassword,
 };
+
