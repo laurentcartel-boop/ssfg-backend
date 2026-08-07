@@ -8,6 +8,7 @@ router.post('/login', authController.login);
 
 // Authenticated
 router.get('/me', authenticate, authController.me);
+router.post('/change-password', authenticate, authController.changePassword);
 
 // Super-admin only (création de comptes)
 router.post('/register', authenticate, requireRole('super_admin'), authController.register);
