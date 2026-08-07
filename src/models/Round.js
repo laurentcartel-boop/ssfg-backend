@@ -12,7 +12,7 @@ const Round = sequelize.define('Round', {
     allowNull: false,
   },
   type: {
-    type: DataTypes.ENUM('libre', 'competition'),
+    type: DataTypes.ENUM('libre', 'competition', 'entrainement'),
     allowNull: false,
     defaultValue: 'libre',
   },
