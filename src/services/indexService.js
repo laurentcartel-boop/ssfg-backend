@@ -87,20 +87,25 @@ function getCategories(user) {
   const cats = [];
   const today = new Date();
 
-  if (user.gender === 'F') cats.push('feminines');
-  if (user.gender === 'M') cats.push('mens');
-
+  let age = null;
   if (user.birth_date) {
     const birth = new Date(user.birth_date);
-    let age = today.getFullYear() - birth.getFullYear();
+    age = today.getFullYear() - birth.getFullYear();
     const m = today.getMonth() - birth.getMonth();
     if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
-
-    if (age < 18) cats.push('juniors');
-    if (age >= 45) cats.push('seniors');
-    if (age >= 55) cats.push('veterans');
   }
 
+  // Catégories exclusives par âge (un joueur n'apparaît que dans sa tranche)
+  if (age !== null) {
+    if (age < 18) cats.push('juniors');
+    else if (age >= 55) cats.push('veterans');
+    else if (age >= 45) cats.push('seniors');
+    else if (user.gender === 'M') cats.push('mens');
+  } else if (user.gender === 'M') {
+    cats.push('mens');
+  }
+
+  if (user.gender === 'F') cats.push('feminines');
   if (user.is_rookie) cats.push('rookies');
 
   return cats;
