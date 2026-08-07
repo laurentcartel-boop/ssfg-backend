@@ -39,14 +39,9 @@ async function start() {
     await sequelize.authenticate();
     console.log('✅ Connexion base de données OK');
 
-    if (process.env.NODE_ENV !== 'production') {
-      await sequelize.sync({ alter: true });
-      console.log('✅ Tables synchronisées');
-    } else {
-      // En production : sync sans alter (les tables existent déjà)
-      await sequelize.sync();
-      console.log('✅ Tables vérifiées');
-    }
+        // alter: true ajoute les nouvelles colonnes sans effacer les données
+    await sequelize.sync({ alter: true });
+    console.log('✅ Tables synchronisées');
 
     app.listen(PORT, () => {
       console.log(`🚀 Serveur démarré sur le port ${PORT}`);
