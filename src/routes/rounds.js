@@ -1,52 +1,46 @@
-const { DataTypes } = require('sequelize');
-const sequelize = require('../config/database');
+const express = require('express');
+const router = express.Router();
+const roundController = require('../controllers/roundController');
+const { authenticate, requireRole } = require('../middleware/auth');
+const { Round, RoundPlayer } = require('../models');
 
-const Round = sequelize.define('Round', {
-  id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
-    primaryKey: true,
-  },
-  name: {
-    type: DataTypes.STRING(200),
-    allowNull: false,
-  },
-  type: {
-    type: DataTypes.ENUM('libre', 'competition', 'entrainement'),
-    allowNull: false,
-    defaultValue: 'libre',
-  },
-  course_id: {
-    type: DataTypes.UUID,
-    allowNull: false,
-  },
-  date: {
-    type: DataTypes.DATEONLY,
-    allowNull: false,
-  },
-  status: {
-    type: DataTypes.ENUM('draft', 'in_progress', 'closed'),
-    defaultValue: 'draft',
-    allowNull: false,
-  },
-  created_by: {
-    type: DataTypes.UUID,
-    allowNull: false,
-  },
-  closed_by: {
-    type: DataTypes.UUID,
-    allowNull: true,
-  },
-  closed_at: {
-    type: DataTypes.DATE,
-    allowNull: true,
-  },
-  competition_id: {
-    type: DataTypes.UUID,
-    allowNull: true,
-  },
-}, {
-  tableName: 'rounds',
+router.use(authenticate);
+
+router.get('/', roundController.listRounds);
+router.get('/:id', roundController.getRound);
+
+router.post('/', async (req, res, next) => {
+  if (req.body?.type === 'entrainement') {
+    return roundController.createRound(req, res, next);
+  }
+  return requireRole('admin', 'super_admin')(req, res, () =>
+    roundController.createRound(req, res, next)
+  );
 });
 
-module.exports = Round;
+router.post('/:id/players', requireRole('admin', 'super_admin'), roundController.addPlayer);
+router.delete('/:id/players/:userId', requireRole('admin', 'super_admin'), roundController.removePlayer);
+
+router.put('/:id/scores', roundController.updateHoleScores);
+
+router.post('/:id/close', async (req, res, next) => {
+  try {
+    if (req.user.role === 'super_admin') {
+      return roundController.closeRound(req, res, next);
+    }
+    const round = await Round.findByPk(req.params.id, {
+      include: [{ model: RoundPlayer, as: 'players' }],
+    });
+    if (!round) return res.status(404).json({ error: 'Partie non trouvée' });
+    if (round.type === 'entrainement') {
+      const isPlayer = (round.players || []).some((p) => p.user_id === req.user.id);
+      if (isPlayer) return roundController.closeRound(req, res, next);
+    }
+    return res.status(403).json({ error: 'Clôture réservée au super-admin' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+module.exports = router;
