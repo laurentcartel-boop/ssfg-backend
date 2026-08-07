@@ -7,12 +7,25 @@ const {
   User,
   sequelize,
 } = require('../models');
+const { calculateIndexChange } = require('../services/indexService');
 
+/**
+ * GET /api/competitions
+ */
 async function listCompetitions(req, res) {
   try {
-    const { status, limit = 50 } = req.query;
+    const { status, year, limit = 50 } = req.query;
     const where = {};
     if (status) where.status = status;
+    if (year) {
+      const y = parseInt(year, 10);
+      if (!Number.isNaN(y)) {
+        where.date = {
+          [require('sequelize').Op.gte]: `${y}-01-01`,
+          [require('sequelize').Op.lte]: `${y}-12-31`,
+        };
+      }
+    }
 
     const competitions = await Competition.findAll({
       where,
@@ -36,6 +49,10 @@ async function listCompetitions(req, res) {
   }
 }
 
+/**
+ * GET /api/competitions/:id
+ * Détail + classement live de tous les squads
+ */
 async function getCompetition(req, res) {
   try {
     const competition = await Competition.findByPk(req.params.id, {
@@ -73,6 +90,7 @@ async function getCompetition(req, res) {
     holesData.forEach((h) => {
       parByHole[h.hole] = Number(h.par) || 4;
     });
+    const parTotal = competition.course?.par_total || 72;
     const leaderboard = [];
 
     for (const squad of competition.squads || []) {
@@ -103,19 +121,28 @@ async function getCompetition(req, res) {
       }
     }
 
+    // Sort by holes played desc, then to_par asc (better), then strokes
     leaderboard.sort((a, b) => {
       if (b.holes_played !== a.holes_played) return b.holes_played - a.holes_played;
       if (a.to_par !== b.to_par) return (a.to_par ?? 99) - (b.to_par ?? 99);
       return a.total_strokes - b.total_strokes;
     });
 
-    res.json({ competition, leaderboard });
+    res.json({
+      competition,
+      leaderboard,
+    });
   } catch (err) {
     console.error('getCompetition error:', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 }
 
+/**
+ * POST /api/competitions
+ * Admin+ : créer une compétition (sans squads au départ)
+ * Body: { name, course_id, date }
+ */
 async function createCompetition(req, res) {
   try {
     const { name, course_id, date } = req.body;
@@ -141,6 +168,11 @@ async function createCompetition(req, res) {
   }
 }
 
+/**
+ * POST /api/competitions/:id/squads
+ * Admin+ : ajouter un squad (partie liée)
+ * Body: { name, player_ids: [] }
+ */
 async function addSquad(req, res) {
   const t = await sequelize.transaction();
   try {
@@ -210,6 +242,11 @@ async function addSquad(req, res) {
   }
 }
 
+/**
+ * POST /api/competitions/:id/close
+ * Super-admin : clôturer la compétition
+ * (ne recalcule pas l'index ici : chaque squad se clôture individuellement)
+ */
 async function closeCompetition(req, res) {
   try {
     const competition = await Competition.findByPk(req.params.id, {
