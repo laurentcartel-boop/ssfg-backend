@@ -41,6 +41,10 @@ const Round = sequelize.define('Round', {
     type: DataTypes.DATE,
     allowNull: true,
   },
+  competition_id: {
+    type: DataTypes.UUID,
+    allowNull: true,
+  },
 }, {
   tableName: 'rounds',
 });
