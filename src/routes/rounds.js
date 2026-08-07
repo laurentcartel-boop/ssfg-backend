@@ -1,25 +1,52 @@
-const express = require('express');
-const router = express.Router();
-const roundController = require('../controllers/roundController');
-const { authenticate, requireRole } = require('../middleware/auth');
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
 
-// Toutes les routes nécessitent d'être connecté
-router.use(authenticate);
+const Round = sequelize.define('Round', {
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true,
+  },
+  name: {
+    type: DataTypes.STRING(200),
+    allowNull: false,
+  },
+  type: {
+    type: DataTypes.ENUM('libre', 'competition', 'entrainement'),
+    allowNull: false,
+    defaultValue: 'libre',
+  },
+  course_id: {
+    type: DataTypes.UUID,
+    allowNull: false,
+  },
+  date: {
+    type: DataTypes.DATEONLY,
+    allowNull: false,
+  },
+  status: {
+    type: DataTypes.ENUM('draft', 'in_progress', 'closed'),
+    defaultValue: 'draft',
+    allowNull: false,
+  },
+  created_by: {
+    type: DataTypes.UUID,
+    allowNull: false,
+  },
+  closed_by: {
+    type: DataTypes.UUID,
+    allowNull: true,
+  },
+  closed_at: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
+  competition_id: {
+    type: DataTypes.UUID,
+    allowNull: true,
+  },
+}, {
+  tableName: 'rounds',
+});
 
-// Liste et détail
-router.get('/', roundController.listRounds);
-router.get('/:id', roundController.getRound);
-
-// Création (Admin + Super-admin)
-router.post('/', requireRole('admin', 'super_admin'), roundController.createRound);
-
-// Ajouter un joueur (Admin + Super-admin)
-router.post('/:id/players', requireRole('admin', 'super_admin'), roundController.addPlayer);
-
-// Saisie des scores (joueur de la partie ou admin)
-router.put('/:id/scores', roundController.updateHoleScores);
-
-// Clôture (Super-admin uniquement)
-router.post('/:id/close', requireRole('super_admin'), roundController.closeRound);
-
-module.exports = router;
+module.exports = Round;
