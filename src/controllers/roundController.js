@@ -92,14 +92,17 @@ async function createRound(req, res) {
       return res.status(400).json({ error: 'name, course_id et date sont obligatoires' });
     }
 
-    if (!['libre', 'competition'].includes(type)) {
+    if (!['libre', 'competition', 'entrainement'].includes(type)) {
       await t.rollback();
       return res.status(400).json({ error: 'type doit être libre ou competition' });
     }
 
-    if (player_ids.length < 2) {
+    const minPlayers = type === 'entrainement' ? 1 : 2;
+    if (player_ids.length < minPlayers) {
       await t.rollback();
-      return res.status(400).json({ error: 'Minimum 2 joueurs requis' });
+      return res.status(400).json({
+        error: type === 'entrainement' ? '1 joueur requis' : 'Minimum 2 joueurs requis',
+      });
     }
 
     const course = await Course.findByPk(course_id);
@@ -352,13 +355,16 @@ async function closeRound(req, res) {
       const scoreToPar = totalScore - parTotal;
       const netScore = Math.round((totalScore - Number(rp.starting_index)) * 10) / 10;
 
-      const { change, newIndex } = calculateIndexChange(
-        totalScore,
-        parTotal,
-        rp.starting_index
-      );
+      const isTraining = round.type === 'entrainement';
+      let change = 0;
+      let newIndex = Number(rp.starting_index);
 
-      // Mise à jour RoundPlayer
+      if (!isTraining) {
+        const result = calculateIndexChange(totalScore, parTotal, rp.starting_index);
+        change = result.change;
+        newIndex = result.newIndex;
+      }
+
       await rp.update(
         {
           total_score: totalScore,
@@ -370,28 +376,27 @@ async function closeRound(req, res) {
         { transaction: t }
       );
 
-      // Mise à jour de l'index du joueur
-      const oldIndex = Number(rp.user.index_value);
-      await rp.user.update(
-        {
-          index_value: newIndex,
-          last_round_date: round.date,
-        },
-        { transaction: t }
-      );
-
-      // Historique
-      await IndexHistory.create(
-        {
-          user_id: rp.user_id,
-          old_index: oldIndex,
-          new_index: newIndex,
-          change,
-          reason: 'round',
-          round_id: round.id,
-        },
-        { transaction: t }
-      );
+      if (!isTraining) {
+        const oldIndex = Number(rp.user.index_value);
+        await rp.user.update(
+          {
+            index_value: newIndex,
+            last_round_date: round.date,
+          },
+          { transaction: t }
+        );
+        await IndexHistory.create(
+          {
+            user_id: rp.user_id,
+            old_index: oldIndex,
+            new_index: newIndex,
+            change,
+            reason: 'round',
+            round_id: round.id,
+          },
+          { transaction: t }
+        );
+      }
 
       updates.push({
         user_id: rp.user_id,
@@ -415,7 +420,7 @@ async function closeRound(req, res) {
     await t.commit();
 
     res.json({
-      message: 'Partie clôturée – index mis à jour',
+      message: round.type === 'entrainement' ? 'Entraînement clôturé (hors index)' : 'Partie clôturée – index mis à jour',
       results: updates,
     });
   } catch (err) {
@@ -425,11 +430,46 @@ async function closeRound(req, res) {
   }
 }
 
+
+/**
+ * DELETE /api/rounds/:id/players/:userId
+ * Retirer un joueur (admin) si aucun score saisi
+ */
+async function removePlayer(req, res) {
+  try {
+    const round = await Round.findByPk(req.params.id, {
+      include: [{ model: RoundPlayer, as: 'players', include: [{ model: HoleScore, as: 'holeScores' }] }],
+    });
+    if (!round) return res.status(404).json({ error: 'Partie non trouvée' });
+    if (round.status === 'closed') {
+      return res.status(400).json({ error: 'Partie déjà clôturée' });
+    }
+
+    const rp = (round.players || []).find((p) => p.user_id === req.params.userId);
+    if (!rp) return res.status(404).json({ error: 'Joueur absent de la partie' });
+
+    if (rp.holeScores && rp.holeScores.length > 0) {
+      return res.status(400).json({ error: 'Impossible : des scores sont déjà saisis pour ce joueur' });
+    }
+
+    if ((round.players || []).length <= 2 && round.type !== 'entrainement') {
+      return res.status(400).json({ error: 'Minimum 2 joueurs dans la partie' });
+    }
+
+    await rp.destroy();
+    res.json({ message: 'Joueur retiré' });
+  } catch (err) {
+    console.error('removePlayer error:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
 module.exports = {
   listRounds,
   getRound,
   createRound,
   addPlayer,
+  removePlayer,
   updateHoleScores,
   closeRound,
 };
