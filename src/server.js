@@ -25,6 +25,7 @@ app.use('/api/courses', require('./routes/courses'));
 app.use('/api/rounds', require('./routes/rounds'));
 app.use('/api/rankings', require('./routes/rankings'));
 app.use('/api/competitions', require('./routes/competitions'));
+app.use('/api/articles', require('./routes/articles'));
 
 // Error handler
 app.use((err, req, res, next) => {
@@ -39,7 +40,7 @@ async function start() {
     await sequelize.authenticate();
     console.log('✅ Connexion base de données OK');
 
-        // alter: true ajoute les nouvelles colonnes sans effacer les données
+    // alter: true ajoute les nouvelles colonnes (ex: competition_id) sans tout effacer
     await sequelize.sync({ alter: true });
     console.log('✅ Tables synchronisées');
 
