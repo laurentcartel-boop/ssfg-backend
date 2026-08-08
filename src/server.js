@@ -6,15 +6,13 @@ const { sequelize } = require('./models');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// CORS – en production, restreindre aux domaines autorisés
 const allowedOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',').map((o) => o.trim())
-  : true; // true = toutes origines (dev)
+  : true;
 
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json());
 
-// Routes
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', app: 'FootGolf Scoring SSFG', version: '1.0.0' });
 });
@@ -27,7 +25,6 @@ app.use('/api/rankings', require('./routes/rankings'));
 app.use('/api/competitions', require('./routes/competitions'));
 app.use('/api/articles', require('./routes/articles'));
 
-// Error handler
 app.use((err, req, res, next) => {
   console.error(err);
   res.status(err.status || 500).json({
@@ -38,17 +35,18 @@ app.use((err, req, res, next) => {
 async function start() {
   try {
     await sequelize.authenticate();
-    console.log('✅ Connexion base de données OK');
+    console.log('OK connexion BDD');
 
-    // alter: true ajoute les nouvelles colonnes (ex: competition_id) sans tout effacer
     await sequelize.sync({ alter: true });
-    console.log('✅ Tables synchronisées');
+    console.log('OK tables');
 
     app.listen(PORT, () => {
-      console.log(`🚀 Serveur démarré sur le port ${PORT}`);
+      console.log('Serveur port ' + PORT);
     });
   } catch (err) {
-    console.error('❌ Impossible de démarrer:', err.message);
+    console.error('Impossible de demarrer');
+    console.error(err);
+    if (err && err.stack) console.error(err.stack);
     process.exit(1);
   }
 }
