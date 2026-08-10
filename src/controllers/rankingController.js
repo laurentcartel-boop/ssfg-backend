@@ -130,27 +130,31 @@ async function getTop20(req, res) {
 
 /**
  * GET /api/rankings/season/:year
- * Classement saison (compétitions clôturées uniquement)
- * Query: ?sort=brut|net  &series=master|serie1|serie2  &category=mens|...
+ * Classement saison par POINTS (compétitions clôturées, score BRUT)
+ * Place 1 = 150 pts, 2 = 145, ... minimum 5 pts pour tous les classés.
+ * Query: ?category=seniors|veterans|mens|...  (optionnel)
  */
+function pointsForPlace(place) {
+  // place 1-based
+  return Math.max(5, 150 - (place - 1) * 5);
+}
+
 async function getSeasonRanking(req, res) {
   try {
     const year = parseInt(req.params.year, 10);
     if (!year || year < 2000 || year > 2100) {
       return res.status(400).json({ error: 'Année invalide' });
     }
-    const sort = req.query.sort === 'net' ? 'net' : 'brut';
-    const { series, category } = req.query;
+    const { category } = req.query;
 
     const {
       Round,
       RoundPlayer,
-      Course,
       User,
       Competition,
     } = require('../models');
 
-    // Parties de type competition, clôturées, dans l'année
+    // Rounds compétition clôturés de l'année
     const rounds = await Round.findAll({
       where: {
         type: 'competition',
@@ -161,7 +165,6 @@ async function getSeasonRanking(req, res) {
         },
       },
       include: [
-        { model: Course, as: 'course', attributes: ['par_total'] },
         {
           model: RoundPlayer,
           as: 'players',
@@ -185,71 +188,99 @@ async function getSeasonRanking(req, res) {
       ],
     });
 
-    // Agrégation par joueur : somme des scores, nb compétitions, meilleur brut/net
-    const byUser = new Map();
-
+    // Grouper par compétition (ou par round si pas de competition_id)
+    const events = new Map();
     for (const round of rounds) {
-      const par = round.course?.par_total || 72;
+      const key = round.competition_id || `round:${round.id}`;
+      if (!events.has(key)) events.set(key, []);
       for (const rp of round.players || []) {
         if (!rp.user || !rp.user.is_active) continue;
         if (rp.total_score == null) continue;
-
-        const uid = rp.user_id;
-        if (!byUser.has(uid)) {
-          byUser.set(uid, {
-            id: uid,
-            first_name: rp.user.first_name,
-            last_name: rp.user.last_name,
-            index_value: Number(rp.user.index_value),
-            series: getIndexSeries(rp.user.index_value),
-            categories: getCategories(rp.user),
-            competitions_played: 0,
-            total_brut: 0,
-            total_net: 0,
-            best_brut: null,
-            best_net: null,
-          });
-        }
-        const row = byUser.get(uid);
-        const brut = Number(rp.total_score);
-        const net = Number(rp.net_score != null ? rp.net_score : brut - Number(rp.starting_index || 0));
-        row.competitions_played += 1;
-        row.total_brut += brut;
-        row.total_net += net;
-        if (row.best_brut === null || brut < row.best_brut) row.best_brut = brut;
-        if (row.best_net === null || net < row.best_net) row.best_net = net;
+        events.get(key).push({
+          user_id: rp.user_id,
+          user: rp.user,
+          brut: Number(rp.total_score),
+        });
       }
     }
 
-    let ranking = Array.from(byUser.values());
+    // Points cumulés par joueur
+    const byUser = new Map();
 
-    if (series === 'master') ranking = ranking.filter((r) => r.series === 'master');
-    else if (series === 'serie1') ranking = ranking.filter((r) => r.series === 'serie1');
-    else if (series === 'serie2') ranking = ranking.filter((r) => r.series === 'serie2');
+    for (const [, entries] of events) {
+      // Un seul score par joueur et par événement (meilleur brut si doublon)
+      const bestByUser = new Map();
+      for (const e of entries) {
+        const prev = bestByUser.get(e.user_id);
+        if (!prev || e.brut < prev.brut) bestByUser.set(e.user_id, e);
+      }
+      const list = Array.from(bestByUser.values());
+      // Classement brut : score le plus bas gagne
+      list.sort((a, b) => a.brut - b.brut);
+
+      list.forEach((e, idx) => {
+        const place = idx + 1;
+        const pts = pointsForPlace(place);
+        if (!byUser.has(e.user_id)) {
+          byUser.set(e.user_id, {
+            id: e.user_id,
+            first_name: e.user.first_name,
+            last_name: e.user.last_name,
+            index_value: Number(e.user.index_value),
+            series: getIndexSeries(e.user.index_value),
+            categories: getCategories(e.user),
+            competitions_played: 0,
+            points: 0,
+            results: [],
+          });
+        }
+        const row = byUser.get(e.user_id);
+        row.competitions_played += 1;
+        row.points += pts;
+        row.results.push({ place, points: pts, brut: e.brut });
+      });
+    }
+
+    let ranking = Array.from(byUser.values());
 
     if (category) {
       ranking = ranking.filter((r) => r.categories.includes(category));
     }
 
-    // Tri : meilleur score (plus bas = mieux) sur la somme, puis best
     ranking.sort((a, b) => {
-      if (sort === 'net') {
-        if (a.total_net !== b.total_net) return a.total_net - b.total_net;
-        return (a.best_net ?? 999) - (b.best_net ?? 999);
+      if (b.points !== a.points) return b.points - a.points;
+      if (a.competitions_played !== b.competitions_played) {
+        return b.competitions_played - a.competitions_played;
       }
-      if (a.total_brut !== b.total_brut) return a.total_brut - b.total_brut;
-      return (a.best_brut ?? 999) - (b.best_brut ?? 999);
+      return a.last_name.localeCompare(b.last_name, 'fr');
     });
 
-    ranking = ranking.map((r, i) => ({ ...r, rank: i + 1 }));
+    ranking = ranking.map((r, i) => ({
+      rank: i + 1,
+      id: r.id,
+      first_name: r.first_name,
+      last_name: r.last_name,
+      index_value: r.index_value,
+      series: r.series,
+      categories: r.categories,
+      competitions_played: r.competitions_played,
+      points: r.points,
+    }));
 
     res.json({
       year,
-      sort,
-      series: series || 'all',
+      mode: 'points',
+      sort: 'brut',
       category: category || null,
       total: ranking.length,
       ranking,
+      rules: {
+        first: 150,
+        step: -5,
+        minimum: 5,
+        description:
+          '1er = 150 pts, 2e = 145, ... minimum 5 pts. Classement par score brut de chaque compétition.',
+      },
     });
   } catch (err) {
     console.error('getSeasonRanking error:', err);
