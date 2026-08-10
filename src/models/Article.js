@@ -22,7 +22,7 @@ const Article = sequelize.define(
       allowNull: false,
     },
     image_url: {
-      type: DataTypes.STRING(1000),
+      type: DataTypes.TEXT('long'),
       allowNull: true,
     },
     published: {
