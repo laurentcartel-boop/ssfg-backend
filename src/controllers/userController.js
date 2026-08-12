@@ -47,7 +47,7 @@ async function getUser(req, res) {
         {
           model: IndexHistory,
           as: 'indexHistory',
-          limit: 20,
+          limit: 50,
           order: [['created_at', 'DESC']],
         },
       ],
