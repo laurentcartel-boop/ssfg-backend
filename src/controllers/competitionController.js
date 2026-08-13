@@ -274,10 +274,34 @@ async function closeCompetition(req, res) {
   }
 }
 
+
+async function deleteCompetition(req, res) {
+  try {
+    const { Competition, Round, RoundPlayer, HoleScore } = require('../models');
+    const competition = await Competition.findByPk(req.params.id, {
+      include: [{ model: Round, as: 'squads', include: [{ model: RoundPlayer, as: 'players', include: [{ model: HoleScore, as: 'holeScores' }] }] }],
+    });
+    if (!competition) return res.status(404).json({ error: 'Compétition non trouvée' });
+    for (const squad of competition.squads || []) {
+      for (const rp of squad.players || []) {
+        await HoleScore.destroy({ where: { round_player_id: rp.id } });
+      }
+      await RoundPlayer.destroy({ where: { round_id: squad.id } });
+      await squad.destroy();
+    }
+    await competition.destroy();
+    res.json({ message: 'Compétition et squads supprimés' });
+  } catch (err) {
+    console.error('deleteCompetition', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
 module.exports = {
   listCompetitions,
   getCompetition,
   createCompetition,
   addSquad,
   closeCompetition,
+  deleteCompetition,
 };
