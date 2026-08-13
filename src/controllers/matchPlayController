@@ -540,14 +540,33 @@ async function drawBracket(req, res) {
       return res.status(400).json({ error: 'Au moins 2 inscrits' });
     }
 
-    const players = shuffle(raw);
-    const n = players.length;
+    // Charger les index pour classer les inscrits (plus bas = meilleur)
+    const userRows = await User.findAll({
+      where: { id: raw },
+      attributes: ['id', 'index_value', 'last_name', 'first_name'],
+    });
+    const byId = Object.fromEntries(userRows.map((u) => [u.id, u]));
+
+    // Meilleurs index d'abord (index bas = fort). Index manquant → traité comme très élevé.
+    const sorted = [...raw].sort((a, b) => {
+      const ia = Number(byId[a]?.index_value);
+      const ib = Number(byId[b]?.index_value);
+      const va = Number.isFinite(ia) ? ia : 99;
+      const vb = Number.isFinite(ib) ? ib : 99;
+      if (va !== vb) return va - vb;
+      // départage alphabétique
+      const na = `${byId[a]?.last_name || ''} ${byId[a]?.first_name || ''}`;
+      const nb = `${byId[b]?.last_name || ''} ${byId[b]?.first_name || ''}`;
+      return na.localeCompare(nb, 'fr');
+    });
+
+    const n = sorted.length;
     const size = nextPowerOf2(n);
     const byesCount = size - n;
-    // Joueurs qui passent sans jouer : les byes
-    // Joueurs qui jouent le 1er tour : n - byesCount (toujours pair)
-    const byePlayers = players.slice(0, byesCount);
-    const playing = players.slice(byesCount);
+    // Byes = les meilleurs (masters / petits index) — quasi sûrs de passer le 1er tour
+    const byePlayers = sorted.slice(0, byesCount);
+    // Les autres jouent le 1er tour (tirage au sort entre eux pour les duels)
+    const playing = shuffle(sorted.slice(byesCount));
 
     const created = [];
     let slot = 0;
@@ -609,7 +628,7 @@ async function drawBracket(req, res) {
       first_round_matches: realMatches,
       warning:
         byesCount > 0
-          ? `${byesCount} joueur(s) qualifié(s) d'office (bye). Ils n'ont pas de match au 1er tour.`
+          ? `${byesCount} bye(s) attribués aux meilleurs index (les plus bas). Ils passent directement au tour suivant.`
           : null,
     });
   } catch (err) {
