@@ -1,0 +1,143 @@
+const express = require('express');
+const router = express.Router();
+const {
+  Round,
+  RoundPlayer,
+  HoleScore,
+  User,
+  Course,
+  Competition,
+} = require('../models');
+
+/**
+ * GET /api/public/live
+ * Parties / compétitions en cours (sans auth)
+ */
+router.get('/live', async (req, res) => {
+  try {
+    const rounds = await Round.findAll({
+      where: { status: 'in_progress' },
+      order: [['date', 'DESC'], ['createdAt', 'DESC']],
+      include: [
+        { model: Course, as: 'course', attributes: ['id', 'name', 'short_name', 'par_total'] },
+        {
+          model: RoundPlayer,
+          as: 'players',
+          attributes: ['id', 'user_id', 'starting_index', 'dnf'],
+          include: [
+            { model: User, as: 'user', attributes: ['id', 'first_name', 'last_name'] },
+          ],
+        },
+      ],
+    });
+
+    const competitions = await Competition.findAll({
+      where: { status: 'open' },
+      order: [['date', 'DESC']],
+      include: [
+        { model: Course, as: 'course', attributes: ['id', 'name', 'short_name'] },
+      ],
+    });
+
+    // Ne garder les compétitions qui ont au moins un squad en cours
+    const liveComps = [];
+    for (const c of competitions) {
+      const squads = await Round.count({
+        where: { competition_id: c.id, status: 'in_progress' },
+      });
+      if (squads > 0) {
+        liveComps.push({
+          id: c.id,
+          name: c.name,
+          date: c.date,
+          course: c.course,
+          squads_in_progress: squads,
+        });
+      }
+    }
+
+    const liveRounds = rounds
+      .filter((r) => !r.competition_id) // parties libres / hors compétition listées à part
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        type: r.type,
+        date: r.date,
+        course: r.course,
+        players_count: (r.players || []).length,
+      }));
+
+    // Aussi lister les squads de compétition en cours
+    const liveSquads = rounds
+      .filter((r) => r.competition_id)
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        type: r.type,
+        date: r.date,
+        competition_id: r.competition_id,
+        course: r.course,
+        players_count: (r.players || []).length,
+      }));
+
+    res.json({
+      has_live: liveRounds.length > 0 || liveComps.length > 0 || liveSquads.length > 0,
+      rounds: liveRounds,
+      competition_squads: liveSquads,
+      competitions: liveComps,
+    });
+  } catch (err) {
+    console.error('public live error:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * GET /api/public/rounds/:id
+ * Scorecard live en lecture seule (sans auth)
+ */
+router.get('/rounds/:id', async (req, res) => {
+  try {
+    const round = await Round.findByPk(req.params.id, {
+      include: [
+        { model: Course, as: 'course' },
+        {
+          model: RoundPlayer,
+          as: 'players',
+          include: [
+            { model: User, as: 'user', attributes: ['id', 'first_name', 'last_name'] },
+            { model: HoleScore, as: 'holeScores' },
+          ],
+        },
+      ],
+    });
+    if (!round) return res.status(404).json({ error: 'Partie non trouvée' });
+
+    res.json({
+      round: {
+        id: round.id,
+        name: round.name,
+        type: round.type,
+        date: round.date,
+        status: round.status,
+        competition_id: round.competition_id,
+        course: round.course,
+        players: (round.players || []).map((rp) => ({
+          id: rp.id,
+          user_id: rp.user_id,
+          starting_index: rp.starting_index,
+          dnf: !!rp.dnf,
+          total_score: rp.total_score,
+          score_to_par: rp.score_to_par,
+          user: rp.user,
+          holeScores: rp.holeScores || [],
+        })),
+      },
+    });
+  } catch (err) {
+    console.error('public round error:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+module.exports = router;
