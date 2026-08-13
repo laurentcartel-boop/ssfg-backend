@@ -39,6 +39,11 @@ const RoundPlayer = sequelize.define('RoundPlayer', {
     type: DataTypes.DECIMAL(5, 1),
     allowNull: true,
   },
+  dnf: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
 }, {
   tableName: 'round_players',
 });
