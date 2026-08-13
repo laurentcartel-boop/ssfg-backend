@@ -7,6 +7,8 @@ const HoleScore = require('./HoleScore');
 const IndexHistory = require('./IndexHistory');
 const Competition = require('./Competition');
 const Article = require('./Article');
+const MatchPlayChampionship = require('./MatchPlayChampionship');
+const MatchPlayMatch = require('./MatchPlayMatch');
 
 // Users / Rounds
 User.hasMany(Round, { foreignKey: 'created_by', as: 'createdRounds' });
@@ -46,6 +48,15 @@ IndexHistory.belongsTo(Round, { foreignKey: 'round_id', as: 'round' });
 User.hasMany(Article, { foreignKey: 'created_by', as: 'articles' });
 Article.belongsTo(User, { foreignKey: 'created_by', as: 'author' });
 
+// Match Play
+MatchPlayChampionship.belongsTo(User, { foreignKey: 'created_by', as: 'creator' });
+MatchPlayChampionship.hasMany(MatchPlayMatch, { foreignKey: 'championship_id', as: 'matches' });
+MatchPlayMatch.belongsTo(MatchPlayChampionship, { foreignKey: 'championship_id', as: 'championship' });
+MatchPlayMatch.belongsTo(User, { foreignKey: 'player_a_id', as: 'playerA' });
+MatchPlayMatch.belongsTo(User, { foreignKey: 'player_b_id', as: 'playerB' });
+MatchPlayMatch.belongsTo(User, { foreignKey: 'winner_id', as: 'winner' });
+MatchPlayMatch.belongsTo(User, { foreignKey: 'created_by', as: 'creator' });
+
 module.exports = {
   sequelize,
   User,
@@ -56,4 +67,6 @@ module.exports = {
   IndexHistory,
   Competition,
   Article,
+  MatchPlayChampionship,
+  MatchPlayMatch,
 };
