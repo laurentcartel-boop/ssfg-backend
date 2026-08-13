@@ -1,0 +1,539 @@
+const { Op } = require('sequelize');
+const {
+  MatchPlayChampionship,
+  MatchPlayMatch,
+  User,
+} = require('../models');
+
+function summarizeHoles(holes) {
+  let a = 0;
+  let b = 0;
+  for (const h of holes || []) {
+    if (h.result === 'a') a += 1;
+    else if (h.result === 'b') b += 1;
+  }
+  return { holes_won_a: a, holes_won_b: b };
+}
+
+function nextPowerOf2(n) {
+  let p = 1;
+  while (p < n) p *= 2;
+  return p;
+}
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/** Liste matchs libres + mes matchs */
+async function listMatches(req, res) {
+  try {
+    const where = {};
+    if (req.query.championship_id) {
+      where.championship_id = req.query.championship_id;
+    } else if (req.query.libre === '1') {
+      where.championship_id = null;
+    }
+    if (req.query.status) where.status = req.query.status;
+
+    const matches = await MatchPlayMatch.findAll({
+      where,
+      order: [['createdAt', 'DESC']],
+      limit: 100,
+      include: [
+        { model: User, as: 'playerA', attributes: ['id', 'first_name', 'last_name', 'index_value'] },
+        { model: User, as: 'playerB', attributes: ['id', 'first_name', 'last_name', 'index_value'] },
+        { model: User, as: 'winner', attributes: ['id', 'first_name', 'last_name'] },
+      ],
+    });
+    res.json({ matches });
+  } catch (err) {
+    console.error('listMatches', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function getMatch(req, res) {
+  try {
+    const match = await MatchPlayMatch.findByPk(req.params.id, {
+      include: [
+        { model: User, as: 'playerA', attributes: ['id', 'first_name', 'last_name', 'index_value'] },
+        { model: User, as: 'playerB', attributes: ['id', 'first_name', 'last_name', 'index_value'] },
+        { model: User, as: 'winner', attributes: ['id', 'first_name', 'last_name'] },
+        { model: MatchPlayChampionship, as: 'championship' },
+      ],
+    });
+    if (!match) return res.status(404).json({ error: 'Match introuvable' });
+    res.json({ match });
+  } catch (err) {
+    console.error('getMatch', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+/** Créer un match libre (tout joueur connecté) */
+async function createLibreMatch(req, res) {
+  try {
+    const { player_b_id } = req.body;
+    if (!player_b_id) return res.status(400).json({ error: 'Adversaire requis' });
+    if (player_b_id === req.user.id) {
+      return res.status(400).json({ error: 'Choisissez un autre joueur' });
+    }
+    const opponent = await User.findByPk(player_b_id);
+    if (!opponent) return res.status(404).json({ error: 'Adversaire introuvable' });
+
+    const match = await MatchPlayMatch.create({
+      championship_id: null,
+      player_a_id: req.user.id,
+      player_b_id,
+      leg: 1,
+      status: 'in_progress',
+      holes_data: [],
+      created_by: req.user.id,
+    });
+
+    const full = await MatchPlayMatch.findByPk(match.id, {
+      include: [
+        { model: User, as: 'playerA', attributes: ['id', 'first_name', 'last_name'] },
+        { model: User, as: 'playerB', attributes: ['id', 'first_name', 'last_name'] },
+      ],
+    });
+    res.status(201).json({ match: full, message: 'Match Play libre créé' });
+  } catch (err) {
+    console.error('createLibreMatch', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+/**
+ * PUT holes: { holes: [{ hole: 1, result: 'a'|'b'|'half' }, ...] }
+ * Ou un seul trou: { hole: 1, result: 'a' }
+ */
+async function updateMatchHoles(req, res) {
+  try {
+    const match = await MatchPlayMatch.findByPk(req.params.id);
+    if (!match) return res.status(404).json({ error: 'Match introuvable' });
+    if (match.status === 'closed') {
+      return res.status(400).json({ error: 'Match déjà terminé' });
+    }
+
+    let holes = Array.isArray(match.holes_data) ? [...match.holes_data] : [];
+
+    if (req.body.holes && Array.isArray(req.body.holes)) {
+      holes = req.body.holes;
+    } else if (req.body.hole != null && req.body.result) {
+      const hole = Number(req.body.hole);
+      const result = req.body.result;
+      if (!['a', 'b', 'half'].includes(result)) {
+        return res.status(400).json({ error: 'result doit être a, b ou half' });
+      }
+      if (hole < 1 || hole > 18) {
+        return res.status(400).json({ error: 'Trou invalide' });
+      }
+      const idx = holes.findIndex((h) => h.hole === hole);
+      if (idx >= 0) holes[idx] = { hole, result };
+      else holes.push({ hole, result });
+      holes.sort((x, y) => x.hole - y.hole);
+    } else {
+      return res.status(400).json({ error: 'Données de score manquantes' });
+    }
+
+    const { holes_won_a, holes_won_b } = summarizeHoles(holes);
+    if (match.status === 'pending') {
+      await match.update({ status: 'in_progress' });
+    }
+    await match.update({ holes_data: holes, holes_won_a, holes_won_b });
+
+    const full = await MatchPlayMatch.findByPk(match.id, {
+      include: [
+        { model: User, as: 'playerA', attributes: ['id', 'first_name', 'last_name'] },
+        { model: User, as: 'playerB', attributes: ['id', 'first_name', 'last_name'] },
+      ],
+    });
+    res.json({ match: full });
+  } catch (err) {
+    console.error('updateMatchHoles', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+/**
+ * Clôturer un match (leg). Calcule le vainqueur de la manche.
+ * Si championnat home_away : crée retour ou belle si besoin, ou avance le vainqueur.
+ */
+async function closeMatch(req, res) {
+  try {
+    const match = await MatchPlayMatch.findByPk(req.params.id, {
+      include: [{ model: MatchPlayChampionship, as: 'championship' }],
+    });
+    if (!match) return res.status(404).json({ error: 'Match introuvable' });
+    if (match.status === 'closed') {
+      return res.status(400).json({ error: 'Match déjà terminé' });
+    }
+
+    const { holes_won_a, holes_won_b } = summarizeHoles(match.holes_data);
+    if (holes_won_a === holes_won_b) {
+      return res.status(400).json({
+        error: 'Égalité sur cette manche — jouez les trous restants ou une belle si déjà 18 trous',
+      });
+    }
+
+    const winnerId = holes_won_a > holes_won_b ? match.player_a_id : match.player_b_id;
+    await match.update({
+      status: 'closed',
+      holes_won_a,
+      holes_won_b,
+      winner_id: winnerId,
+    });
+
+    let message = 'Manche terminée';
+    const champ = match.championship;
+
+    if (champ && champ.format === 'home_away' && match.series_key) {
+      const siblings = await MatchPlayMatch.findAll({
+        where: { series_key: match.series_key },
+      });
+      const closed = siblings.filter((s) => s.status === 'closed');
+      const legsDone = closed.length;
+
+      // Cumul trous sur les manches terminées (hors belle pure : on cumule holes won)
+      if (match.leg === 1) {
+        // Créer le retour
+        const retour = await MatchPlayMatch.create({
+          championship_id: match.championship_id,
+          player_a_id: match.player_b_id, // inversion terrain symbolique
+          player_b_id: match.player_a_id,
+          round_size: match.round_size,
+          bracket_slot: match.bracket_slot,
+          leg: 2,
+          series_key: match.series_key,
+          status: 'pending',
+          holes_data: [],
+          created_by: req.user.id,
+        });
+        message = 'Aller terminé — match retour créé';
+        return res.json({ match, next_match: retour, message });
+      }
+
+      if (match.leg === 2) {
+        // Cumul aller + retour (par joueur d'origine du series : player_a du leg 1)
+        const aller = siblings.find((s) => s.leg === 1);
+        // leg1: A vs B, leg2: B vs A (inversé)
+        let totalOrigA = (aller?.holes_won_a || 0) + (match.holes_won_b || 0);
+        let totalOrigB = (aller?.holes_won_b || 0) + (match.holes_won_a || 0);
+        const origA = aller.player_a_id;
+        const origB = aller.player_b_id;
+
+        if (totalOrigA === totalOrigB) {
+          const belle = await MatchPlayMatch.create({
+            championship_id: match.championship_id,
+            player_a_id: origA,
+            player_b_id: origB,
+            round_size: match.round_size,
+            bracket_slot: match.bracket_slot,
+            leg: 3,
+            series_key: match.series_key,
+            status: 'pending',
+            holes_data: [],
+            created_by: req.user.id,
+          });
+          message = 'Égalité après A/R — la belle est créée';
+          return res.json({ match, next_match: belle, message });
+        }
+
+        const seriesWinner = totalOrigA > totalOrigB ? origA : origB;
+        message = 'Série A/R terminée';
+        await advanceWinner(champ, match.round_size, match.bracket_slot, seriesWinner, req.user.id);
+        return res.json({ match, series_winner_id: seriesWinner, message });
+      }
+
+      if (match.leg === 3) {
+        message = 'Belle terminée';
+        await advanceWinner(champ, match.round_size, match.bracket_slot, winnerId, req.user.id);
+        return res.json({ match, series_winner_id: winnerId, message });
+      }
+    }
+
+    // Single match libre ou championnat format single
+    if (champ && champ.format === 'single') {
+      await advanceWinner(champ, match.round_size, match.bracket_slot, winnerId, req.user.id);
+      message = 'Match terminé — vainqueur avancé si tableau';
+    }
+
+    res.json({ match, message });
+  } catch (err) {
+    console.error('closeMatch', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function advanceWinner(champ, roundSize, slot, winnerId, createdBy) {
+  if (!champ || !roundSize || slot == null) return;
+  const nextSize = roundSize / 2;
+  if (nextSize < 1) return;
+
+  const nextSlot = Math.floor(slot / 2);
+  // Trouver ou créer le match suivant
+  let next = await MatchPlayMatch.findOne({
+    where: {
+      championship_id: champ.id,
+      round_size: nextSize,
+      bracket_slot: nextSlot,
+      leg: 1,
+    },
+  });
+
+  if (!next) {
+    // Créer avec un seul joueur pour l'instant — on met winner en A ou B selon slot pair/impair
+    const isA = slot % 2 === 0;
+    next = await MatchPlayMatch.create({
+      championship_id: champ.id,
+      player_a_id: isA ? winnerId : winnerId, // placeholder both same until second arrives - fix below
+      player_b_id: winnerId,
+      round_size: nextSize,
+      bracket_slot: nextSlot,
+      leg: 1,
+      series_key: champ.format === 'home_away' ? `${champ.id}-R${nextSize}-S${nextSlot}` : null,
+      status: 'pending',
+      holes_data: [],
+      created_by: createdBy,
+    });
+    // Mark temporary: store winner only in correct side via update after create
+    if (isA) {
+      await next.update({ player_a_id: winnerId, player_b_id: winnerId });
+    } else {
+      await next.update({ player_a_id: winnerId, player_b_id: winnerId });
+    }
+  }
+
+  // Re-fetch and set correct player
+  next = await MatchPlayMatch.findOne({
+    where: {
+      championship_id: champ.id,
+      round_size: nextSize,
+      bracket_slot: nextSlot,
+      leg: 1,
+    },
+  });
+
+  const isA = slot % 2 === 0;
+  if (isA) {
+    await next.update({ player_a_id: winnerId });
+  } else {
+    await next.update({ player_b_id: winnerId });
+  }
+
+  // Si A et B sont distincts → prêt
+  const refreshed = await MatchPlayMatch.findByPk(next.id);
+  if (refreshed.player_a_id !== refreshed.player_b_id) {
+    await refreshed.update({ status: 'pending' });
+  }
+}
+
+// ——— Championnats ———
+
+async function listChampionships(req, res) {
+  try {
+    const list = await MatchPlayChampionship.findAll({
+      order: [['createdAt', 'DESC']],
+      include: [{ model: User, as: 'creator', attributes: ['id', 'first_name', 'last_name'] }],
+    });
+    res.json({ championships: list });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function getChampionship(req, res) {
+  try {
+    const c = await MatchPlayChampionship.findByPk(req.params.id, {
+      include: [
+        { model: User, as: 'creator', attributes: ['id', 'first_name', 'last_name'] },
+        {
+          model: MatchPlayMatch,
+          as: 'matches',
+          include: [
+            { model: User, as: 'playerA', attributes: ['id', 'first_name', 'last_name'] },
+            { model: User, as: 'playerB', attributes: ['id', 'first_name', 'last_name'] },
+            { model: User, as: 'winner', attributes: ['id', 'first_name', 'last_name'] },
+          ],
+        },
+      ],
+    });
+    if (!c) return res.status(404).json({ error: 'Championnat introuvable' });
+
+    const entrantIds = c.entrants || [];
+    const players = entrantIds.length
+      ? await User.findAll({
+          where: { id: entrantIds },
+          attributes: ['id', 'first_name', 'last_name', 'index_value'],
+        })
+      : [];
+
+    res.json({ championship: c, players });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function createChampionship(req, res) {
+  try {
+    const { name, format } = req.body;
+    if (!name) return res.status(400).json({ error: 'Nom requis' });
+    const c = await MatchPlayChampionship.create({
+      name: name.trim(),
+      format: format === 'home_away' ? 'home_away' : 'single',
+      status: 'open',
+      entrants: [],
+      created_by: req.user.id,
+    });
+    res.status(201).json({ championship: c, message: 'Championnat Match Play créé' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function addEntrants(req, res) {
+  try {
+    const c = await MatchPlayChampionship.findByPk(req.params.id);
+    if (!c) return res.status(404).json({ error: 'Championnat introuvable' });
+    if (c.status !== 'open') {
+      return res.status(400).json({ error: 'Inscriptions fermées (tableau déjà tiré)' });
+    }
+    const ids = req.body.player_ids || [];
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'player_ids requis' });
+    }
+    const set = new Set([...(c.entrants || []), ...ids]);
+    await c.update({ entrants: [...set] });
+    res.json({ championship: c, message: 'Inscrits mis à jour' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+/** Tirage + génération du 1er tour */
+async function drawBracket(req, res) {
+  try {
+    const c = await MatchPlayChampionship.findByPk(req.params.id);
+    if (!c) return res.status(404).json({ error: 'Championnat introuvable' });
+    if (c.status !== 'open') {
+      return res.status(400).json({ error: 'Tableau déjà généré' });
+    }
+    const entrants = shuffle(c.entrants || []);
+    if (entrants.length < 2) {
+      return res.status(400).json({ error: 'Au moins 2 inscrits' });
+    }
+
+    const size = nextPowerOf2(entrants.length);
+    // Byes : on place null pour les places manquantes
+    while (entrants.length < size) entrants.push(null);
+
+    const created = [];
+    for (let slot = 0; slot < size / 2; slot++) {
+      const a = entrants[slot * 2];
+      const b = entrants[slot * 2 + 1];
+      if (!a && !b) continue;
+      if (a && !b) {
+        // Bye : vainqueur auto A → on crée un match closed
+        const m = await MatchPlayMatch.create({
+          championship_id: c.id,
+          player_a_id: a,
+          player_b_id: a,
+          round_size: size,
+          bracket_slot: slot,
+          leg: 1,
+          series_key: c.format === 'home_away' ? `${c.id}-R${size}-S${slot}` : null,
+          status: 'closed',
+          holes_data: [],
+          holes_won_a: 1,
+          holes_won_b: 0,
+          winner_id: a,
+          created_by: req.user.id,
+        });
+        created.push(m);
+        await advanceWinner(c, size, slot, a, req.user.id);
+        continue;
+      }
+      if (!a && b) {
+        const m = await MatchPlayMatch.create({
+          championship_id: c.id,
+          player_a_id: b,
+          player_b_id: b,
+          round_size: size,
+          bracket_slot: slot,
+          leg: 1,
+          series_key: c.format === 'home_away' ? `${c.id}-R${size}-S${slot}` : null,
+          status: 'closed',
+          holes_data: [],
+          holes_won_a: 1,
+          holes_won_b: 0,
+          winner_id: b,
+          created_by: req.user.id,
+        });
+        created.push(m);
+        await advanceWinner(c, size, slot, b, req.user.id);
+        continue;
+      }
+
+      const m = await MatchPlayMatch.create({
+        championship_id: c.id,
+        player_a_id: a,
+        player_b_id: b,
+        round_size: size,
+        bracket_slot: slot,
+        leg: 1,
+        series_key: c.format === 'home_away' ? `${c.id}-R${size}-S${slot}` : null,
+        status: 'pending',
+        holes_data: [],
+        created_by: req.user.id,
+      });
+      created.push(m);
+    }
+
+    await c.update({ status: 'in_progress' });
+    res.json({ message: 'Tirage effectué', matches_created: created.length, bracket_size: size });
+  } catch (err) {
+    console.error('drawBracket', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function closeChampionship(req, res) {
+  try {
+    const c = await MatchPlayChampionship.findByPk(req.params.id);
+    if (!c) return res.status(404).json({ error: 'Championnat introuvable' });
+    await c.update({
+      status: 'closed',
+      closed_by: req.user.id,
+      closed_at: new Date(),
+    });
+    res.json({ message: 'Championnat clôturé', championship: c });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+module.exports = {
+  listMatches,
+  getMatch,
+  createLibreMatch,
+  updateMatchHoles,
+  closeMatch,
+  listChampionships,
+  getChampionship,
+  createChampionship,
+  addEntrants,
+  drawBracket,
+  closeChampionship,
+};
