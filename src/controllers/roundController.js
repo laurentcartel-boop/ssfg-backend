@@ -531,8 +531,38 @@ async function setPlayerDnf(req, res) {
   }
 }
 
+
+/**
+ * DELETE /api/rounds/:id — super-admin : supprimer une partie (erreur / test)
+ */
+async function deleteRound(req, res) {
+  const t = await sequelize.transaction();
+  try {
+    const round = await Round.findByPk(req.params.id, {
+      include: [{ model: RoundPlayer, as: 'players', include: [{ model: HoleScore, as: 'holeScores' }] }],
+      transaction: t,
+    });
+    if (!round) {
+      await t.rollback();
+      return res.status(404).json({ error: 'Partie non trouvée' });
+    }
+    for (const rp of round.players || []) {
+      await HoleScore.destroy({ where: { round_player_id: rp.id }, transaction: t });
+    }
+    await RoundPlayer.destroy({ where: { round_id: round.id }, transaction: t });
+    await round.destroy({ transaction: t });
+    await t.commit();
+    res.json({ message: 'Partie supprimée' });
+  } catch (err) {
+    await t.rollback();
+    console.error('deleteRound', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
 module.exports = {
   setPlayerDnf,
+  deleteRound,
   listRounds,
   getRound,
   createRound,
