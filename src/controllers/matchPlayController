@@ -456,8 +456,8 @@ async function getChampionship(req, res) {
           n < 2
             ? 'Au moins 2 inscrits requis'
             : byes > 0
-              ? `${n} inscrits → tableau de ${bracketSize} (${byes} qualification(s) d'office / bye). Les byes ne jouent pas contre eux-mêmes.`
-              : `${n} inscrits → tableau complet de ${bracketSize}`,
+              ? `${n} inscrits → tableau de ${bracketSize} : ${n - byes} joueurs jouent le 1er tour (${(n - byes) / 2} matchs), ${byes} bye(s) → ${bracketSize / 2} qualifiés.`
+              : `${n} inscrits → tableau complet de ${bracketSize} (${bracketSize / 2} matchs)`,
       },
     });
   } catch (err) {
@@ -521,8 +521,11 @@ async function addEntrants(req, res) {
 }
 
 /**
- * Tirage : tableau puissance de 2.
- * Byes = qualifications d'office (affichées clairement, pas de match contre soi-même).
+ * Tirage correct :
+ * n joueurs → tableau size=2^k.
+ * byes = size - n  → qualifications d'office
+ * matchs R1 = (size/2 - byes) = n - size/2
+ * Exactement size/2 qualifiés pour le tour suivant (jamais 11 pour un tableau de 8).
  */
 async function drawBracket(req, res) {
   try {
@@ -537,68 +540,47 @@ async function drawBracket(req, res) {
       return res.status(400).json({ error: 'Au moins 2 inscrits' });
     }
 
-    const entrants = shuffle(raw);
-    const size = nextPowerOf2(entrants.length);
-    const byesCount = size - entrants.length;
-
-    // Compléter avec null = bye
-    const bracket = [...entrants];
-    while (bracket.length < size) bracket.push(null);
+    const players = shuffle(raw);
+    const n = players.length;
+    const size = nextPowerOf2(n);
+    const byesCount = size - n;
+    // Joueurs qui passent sans jouer : les byes
+    // Joueurs qui jouent le 1er tour : n - byesCount (toujours pair)
+    const byePlayers = players.slice(0, byesCount);
+    const playing = players.slice(byesCount);
 
     const created = [];
-    for (let slot = 0; slot < size / 2; slot++) {
-      const a = bracket[slot * 2];
-      const b = bracket[slot * 2 + 1];
+    let slot = 0;
+
+    // 1) Byes d'abord (qualifs d'office)
+    for (const pid of byePlayers) {
       const key = c.format === 'home_away' ? seriesKey(c.id, size, slot) : null;
+      const byeMatch = await MatchPlayMatch.create({
+        championship_id: c.id,
+        player_a_id: pid,
+        player_b_id: null,
+        round_size: size,
+        bracket_slot: slot,
+        leg: 1,
+        series_key: key,
+        status: 'closed',
+        holes_data: [],
+        holes_won_a: 0,
+        holes_won_b: 0,
+        winner_id: pid,
+        is_bye: true,
+        created_by: req.user.id,
+      });
+      created.push(byeMatch);
+      await advanceWinner(c, size, slot, pid, req.user.id);
+      slot += 1;
+    }
 
-      // Double vide (ne devrait pas arriver)
-      if (!a && !b) continue;
-
-      // Bye : un seul joueur → qualifié d'office, avance au tour suivant
-      if (a && !b) {
-        const byeMatch = await MatchPlayMatch.create({
-          championship_id: c.id,
-          player_a_id: a,
-          player_b_id: null,
-          round_size: size,
-          bracket_slot: slot,
-          leg: 1,
-          series_key: key,
-          status: 'closed',
-          holes_data: [],
-          holes_won_a: 0,
-          holes_won_b: 0,
-          winner_id: a,
-          is_bye: true,
-          created_by: req.user.id,
-        });
-        created.push(byeMatch);
-        await advanceWinner(c, size, slot, a, req.user.id);
-        continue;
-      }
-      if (!a && b) {
-        const byeMatch = await MatchPlayMatch.create({
-          championship_id: c.id,
-          player_a_id: b,
-          player_b_id: null,
-          round_size: size,
-          bracket_slot: slot,
-          leg: 1,
-          series_key: key,
-          status: 'closed',
-          holes_data: [],
-          holes_won_a: 0,
-          holes_won_b: 0,
-          winner_id: b,
-          is_bye: true,
-          created_by: req.user.id,
-        });
-        created.push(byeMatch);
-        await advanceWinner(c, size, slot, b, req.user.id);
-        continue;
-      }
-
-      // Vrai duel
+    // 2) Vrais duels
+    for (let i = 0; i < playing.length; i += 2) {
+      const a = playing[i];
+      const b = playing[i + 1];
+      const key = c.format === 'home_away' ? seriesKey(c.id, size, slot) : null;
       const m = await MatchPlayMatch.create({
         championship_id: c.id,
         player_a_id: a,
@@ -613,18 +595,21 @@ async function drawBracket(req, res) {
         created_by: req.user.id,
       });
       created.push(m);
+      slot += 1;
     }
 
     await c.update({ status: 'in_progress' });
 
+    const realMatches = playing.length / 2;
     res.json({
-      message: `Tirage effectué — tableau de ${size}${byesCount ? ` (${byesCount} bye(s))` : ''}`,
+      message: `Tirage OK — tableau ${size} : ${realMatches} match(s) + ${byesCount} bye(s) → ${size / 2} qualifiés`,
       matches_created: created.length,
       bracket_size: size,
       byes: byesCount,
+      first_round_matches: realMatches,
       warning:
         byesCount > 0
-          ? `${byesCount} joueur(s) qualifié(s) d'office pour le tour suivant (nombre d'inscrits non puissance de 2).`
+          ? `${byesCount} joueur(s) qualifié(s) d'office (bye). Ils n'ont pas de match au 1er tour.`
           : null,
     });
   } catch (err) {
@@ -649,6 +634,39 @@ async function closeChampionship(req, res) {
   }
 }
 
+
+/** Super-admin : supprimer un championnat + tous ses matchs */
+async function deleteChampionship(req, res) {
+  try {
+    const c = await MatchPlayChampionship.findByPk(req.params.id);
+    if (!c) return res.status(404).json({ error: 'Championnat introuvable' });
+    await MatchPlayMatch.destroy({ where: { championship_id: c.id } });
+    await c.destroy();
+    res.json({ message: 'Championnat et matchs supprimés' });
+  } catch (err) {
+    console.error('deleteChampionship', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+/** Super-admin : supprimer un match libre (hors championnat) */
+async function deleteMatch(req, res) {
+  try {
+    const m = await MatchPlayMatch.findByPk(req.params.id);
+    if (!m) return res.status(404).json({ error: 'Match introuvable' });
+    if (m.championship_id) {
+      return res.status(400).json({
+        error: 'Match de championnat : supprimez le championnat entier, ou laissez-le',
+      });
+    }
+    await m.destroy();
+    res.json({ message: 'Match libre supprimé' });
+  } catch (err) {
+    console.error('deleteMatch', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
 module.exports = {
   listMatches,
   getMatch,
@@ -661,4 +679,6 @@ module.exports = {
   addEntrants,
   drawBracket,
   closeChampionship,
+  deleteChampionship,
+  deleteMatch,
 };
