@@ -27,6 +27,7 @@ app.use('/api/rounds', require('./routes/rounds'));
 app.use('/api/rankings', require('./routes/rankings'));
 app.use('/api/competitions', require('./routes/competitions'));
 app.use('/api/articles', require('./routes/articles'));
+app.use('/api/matchplay', require('./routes/matchplay'));
 
 // Error handler
 app.use((err, req, res, next) => {
