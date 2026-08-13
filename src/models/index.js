@@ -49,13 +49,14 @@ User.hasMany(Article, { foreignKey: 'created_by', as: 'articles' });
 Article.belongsTo(User, { foreignKey: 'created_by', as: 'author' });
 
 // Match Play
-MatchPlayChampionship.belongsTo(User, { foreignKey: 'created_by', as: 'creator' });
-MatchPlayChampionship.hasMany(MatchPlayMatch, { foreignKey: 'championship_id', as: 'matches' });
-MatchPlayMatch.belongsTo(MatchPlayChampionship, { foreignKey: 'championship_id', as: 'championship' });
-MatchPlayMatch.belongsTo(User, { foreignKey: 'player_a_id', as: 'playerA' });
-MatchPlayMatch.belongsTo(User, { foreignKey: 'player_b_id', as: 'playerB' });
-MatchPlayMatch.belongsTo(User, { foreignKey: 'winner_id', as: 'winner' });
-MatchPlayMatch.belongsTo(User, { foreignKey: 'created_by', as: 'creator' });
+MatchPlayChampionship.belongsTo(User, { foreignKey: 'created_by', as: 'creator', constraints: false });
+MatchPlayChampionship.hasMany(MatchPlayMatch, { foreignKey: 'championship_id', as: 'matches', constraints: false });
+MatchPlayMatch.belongsTo(MatchPlayChampionship, { foreignKey: 'championship_id', as: 'championship', constraints: false });
+// constraints: false → permet player_a/b NULL (byes / en attente) sans FK MySQL bloquante
+MatchPlayMatch.belongsTo(User, { foreignKey: 'player_a_id', as: 'playerA', constraints: false });
+MatchPlayMatch.belongsTo(User, { foreignKey: 'player_b_id', as: 'playerB', constraints: false });
+MatchPlayMatch.belongsTo(User, { foreignKey: 'winner_id', as: 'winner', constraints: false });
+MatchPlayMatch.belongsTo(User, { foreignKey: 'created_by', as: 'creator', constraints: false });
 
 module.exports = {
   sequelize,
