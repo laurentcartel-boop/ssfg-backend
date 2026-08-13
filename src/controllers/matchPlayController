@@ -1,4 +1,3 @@
-const { Op } = require('sequelize');
 const {
   MatchPlayChampionship,
   MatchPlayMatch,
@@ -30,7 +29,92 @@ function shuffle(arr) {
   return a;
 }
 
-/** Liste matchs libres + mes matchs */
+function seriesKey(champId, roundSize, slot) {
+  return `${champId}-R${roundSize}-S${slot}`;
+}
+
+/**
+ * Place le vainqueur dans le match du tour suivant.
+ * Les slots pairs (0,2,4…) → player A ; impairs → player B.
+ * Ne crée jamais un match « contre soi-même ».
+ */
+async function advanceWinner(champ, roundSize, slot, winnerId, createdBy) {
+  if (!champ || roundSize == null || slot == null || !winnerId) return null;
+  if (roundSize <= 2) {
+    // Finale terminée
+    return null;
+  }
+
+  const nextSize = roundSize / 2;
+  const nextSlot = Math.floor(slot / 2);
+  const goesToA = slot % 2 === 0;
+
+  let next = await MatchPlayMatch.findOne({
+    where: {
+      championship_id: champ.id,
+      round_size: nextSize,
+      bracket_slot: nextSlot,
+      leg: 1,
+      is_bye: false,
+    },
+  });
+
+  if (!next) {
+    next = await MatchPlayMatch.create({
+      championship_id: champ.id,
+      player_a_id: goesToA ? winnerId : null,
+      player_b_id: goesToA ? null : winnerId,
+      round_size: nextSize,
+      bracket_slot: nextSlot,
+      leg: 1,
+      series_key:
+        champ.format === 'home_away' ? seriesKey(champ.id, nextSize, nextSlot) : null,
+      status: 'pending',
+      holes_data: [],
+      is_bye: false,
+      created_by: createdBy,
+    });
+    return next;
+  }
+
+  // Ne pas écraser un joueur déjà placé avec le même id des deux côtés
+  const updates = {};
+  if (goesToA) {
+    if (next.player_a_id && next.player_a_id !== winnerId) {
+      // déjà rempli
+    } else {
+      updates.player_a_id = winnerId;
+    }
+  } else if (next.player_b_id && next.player_b_id !== winnerId) {
+    // déjà rempli
+  } else {
+    updates.player_b_id = winnerId;
+  }
+
+  if (Object.keys(updates).length) {
+    await next.update(updates);
+  }
+
+  next = await MatchPlayMatch.findByPk(next.id);
+
+  // Si les deux joueurs sont identiques (bug résiduel) → corriger
+  if (
+    next.player_a_id &&
+    next.player_b_id &&
+    next.player_a_id === next.player_b_id
+  ) {
+    // Garder seulement le côté qui vient d'arriver
+    if (goesToA) {
+      await next.update({ player_b_id: null });
+    } else {
+      await next.update({ player_a_id: null });
+    }
+    next = await MatchPlayMatch.findByPk(next.id);
+  }
+
+  return next;
+}
+
 async function listMatches(req, res) {
   try {
     const where = {};
@@ -76,7 +160,6 @@ async function getMatch(req, res) {
   }
 }
 
-/** Créer un match libre (tout joueur connecté) */
 async function createLibreMatch(req, res) {
   try {
     const { player_b_id } = req.body;
@@ -94,6 +177,7 @@ async function createLibreMatch(req, res) {
       leg: 1,
       status: 'in_progress',
       holes_data: [],
+      is_bye: false,
       created_by: req.user.id,
     });
 
@@ -110,16 +194,19 @@ async function createLibreMatch(req, res) {
   }
 }
 
-/**
- * PUT holes: { holes: [{ hole: 1, result: 'a'|'b'|'half' }, ...] }
- * Ou un seul trou: { hole: 1, result: 'a' }
- */
 async function updateMatchHoles(req, res) {
   try {
     const match = await MatchPlayMatch.findByPk(req.params.id);
     if (!match) return res.status(404).json({ error: 'Match introuvable' });
+    if (match.is_bye) return res.status(400).json({ error: 'Qualifié d\'office (bye)' });
     if (match.status === 'closed') {
       return res.status(400).json({ error: 'Match déjà terminé' });
+    }
+    if (!match.player_a_id || !match.player_b_id) {
+      return res.status(400).json({ error: 'En attente de l\'autre finaliste du tour précédent' });
+    }
+    if (match.player_a_id === match.player_b_id) {
+      return res.status(400).json({ error: 'Match invalide (même joueur des deux côtés)' });
     }
 
     let holes = Array.isArray(match.holes_data) ? [...match.holes_data] : [];
@@ -144,10 +231,12 @@ async function updateMatchHoles(req, res) {
     }
 
     const { holes_won_a, holes_won_b } = summarizeHoles(holes);
-    if (match.status === 'pending') {
-      await match.update({ status: 'in_progress' });
-    }
-    await match.update({ holes_data: holes, holes_won_a, holes_won_b });
+    await match.update({
+      holes_data: holes,
+      holes_won_a,
+      holes_won_b,
+      status: match.status === 'pending' ? 'in_progress' : match.status,
+    });
 
     const full = await MatchPlayMatch.findByPk(match.id, {
       include: [
@@ -163,8 +252,9 @@ async function updateMatchHoles(req, res) {
 }
 
 /**
- * Clôturer un match (leg). Calcule le vainqueur de la manche.
- * Si championnat home_away : crée retour ou belle si besoin, ou avance le vainqueur.
+ * Clôturer une manche.
+ * single → vainqueur avance
+ * home_away → aller → retour → si égalité cumul trous → belle → vainqueur avance
  */
 async function closeMatch(req, res) {
   try {
@@ -172,41 +262,51 @@ async function closeMatch(req, res) {
       include: [{ model: MatchPlayChampionship, as: 'championship' }],
     });
     if (!match) return res.status(404).json({ error: 'Match introuvable' });
+    if (match.is_bye) return res.status(400).json({ error: 'Bye — déjà qualifié' });
     if (match.status === 'closed') {
       return res.status(400).json({ error: 'Match déjà terminé' });
+    }
+    if (!match.player_a_id || !match.player_b_id || match.player_a_id === match.player_b_id) {
+      return res.status(400).json({ error: 'Match incomplet ou invalide' });
     }
 
     const { holes_won_a, holes_won_b } = summarizeHoles(match.holes_data);
     if (holes_won_a === holes_won_b) {
       return res.status(400).json({
-        error: 'Égalité sur cette manche — jouez les trous restants ou une belle si déjà 18 trous',
+        error:
+          'Égalité sur cette manche : continuez les trous (ou jouez jusqu\'à départager) avant de clôturer.',
       });
     }
 
-    const winnerId = holes_won_a > holes_won_b ? match.player_a_id : match.player_b_id;
+    const legWinnerId = holes_won_a > holes_won_b ? match.player_a_id : match.player_b_id;
     await match.update({
       status: 'closed',
       holes_won_a,
       holes_won_b,
-      winner_id: winnerId,
+      winner_id: legWinnerId,
     });
 
-    let message = 'Manche terminée';
     const champ = match.championship;
+    let message = 'Manche terminée';
+    let next_match = null;
+    let series_winner_id = null;
 
+    // ——— Championnat aller-retour ———
     if (champ && champ.format === 'home_away' && match.series_key) {
+      // Recharger toutes les manches de la série
       const siblings = await MatchPlayMatch.findAll({
         where: { series_key: match.series_key },
+        order: [['leg', 'ASC']],
       });
-      const closed = siblings.filter((s) => s.status === 'closed');
-      const legsDone = closed.length;
+      const aller = siblings.find((s) => s.leg === 1);
+      const retour = siblings.find((s) => s.leg === 2);
+      const belleExisting = siblings.find((s) => s.leg === 3);
 
-      // Cumul trous sur les manches terminées (hors belle pure : on cumule holes won)
       if (match.leg === 1) {
-        // Créer le retour
-        const retour = await MatchPlayMatch.create({
+        // Créer le retour (joueurs inversés)
+        next_match = await MatchPlayMatch.create({
           championship_id: match.championship_id,
-          player_a_id: match.player_b_id, // inversion terrain symbolique
+          player_a_id: match.player_b_id,
           player_b_id: match.player_a_id,
           round_size: match.round_size,
           bracket_slot: match.bracket_slot,
@@ -214,128 +314,92 @@ async function closeMatch(req, res) {
           series_key: match.series_key,
           status: 'pending',
           holes_data: [],
+          is_bye: false,
           created_by: req.user.id,
         });
         message = 'Aller terminé — match retour créé';
-        return res.json({ match, next_match: retour, message });
+        return res.json({ match, next_match, message });
       }
 
-      if (match.leg === 2) {
-        // Cumul aller + retour (par joueur d'origine du series : player_a du leg 1)
-        const aller = siblings.find((s) => s.leg === 1);
-        // leg1: A vs B, leg2: B vs A (inversé)
-        let totalOrigA = (aller?.holes_won_a || 0) + (match.holes_won_b || 0);
-        let totalOrigB = (aller?.holes_won_b || 0) + (match.holes_won_a || 0);
+      if (match.leg === 2 && aller) {
+        // Cumul des trous gagnés pour les joueurs d'origine (aller)
+        // Aller : A=origA, B=origB
+        // Retour : A=origB, B=origA  → trous de origA = aller.a + retour.b
         const origA = aller.player_a_id;
         const origB = aller.player_b_id;
+        const totalOrigA = Number(aller.holes_won_a || 0) + Number(match.holes_won_b || 0);
+        const totalOrigB = Number(aller.holes_won_b || 0) + Number(match.holes_won_a || 0);
 
         if (totalOrigA === totalOrigB) {
-          const belle = await MatchPlayMatch.create({
-            championship_id: match.championship_id,
-            player_a_id: origA,
-            player_b_id: origB,
-            round_size: match.round_size,
-            bracket_slot: match.bracket_slot,
-            leg: 3,
-            series_key: match.series_key,
-            status: 'pending',
-            holes_data: [],
-            created_by: req.user.id,
-          });
-          message = 'Égalité après A/R — la belle est créée';
-          return res.json({ match, next_match: belle, message });
+          if (!belleExisting) {
+            next_match = await MatchPlayMatch.create({
+              championship_id: match.championship_id,
+              player_a_id: origA,
+              player_b_id: origB,
+              round_size: match.round_size,
+              bracket_slot: match.bracket_slot,
+              leg: 3,
+              series_key: match.series_key,
+              status: 'pending',
+              holes_data: [],
+              is_bye: false,
+              created_by: req.user.id,
+            });
+          }
+          message = `Égalité ${totalOrigA}-${totalOrigB} après A/R — la belle est créée`;
+          return res.json({ match, next_match, message, series_tied: true });
         }
 
-        const seriesWinner = totalOrigA > totalOrigB ? origA : origB;
-        message = 'Série A/R terminée';
-        await advanceWinner(champ, match.round_size, match.bracket_slot, seriesWinner, req.user.id);
-        return res.json({ match, series_winner_id: seriesWinner, message });
+        series_winner_id = totalOrigA > totalOrigB ? origA : origB;
+        message = `Série A/R terminée (${totalOrigA}-${totalOrigB})`;
+        await advanceWinner(
+          champ,
+          match.round_size,
+          match.bracket_slot,
+          series_winner_id,
+          req.user.id
+        );
+        return res.json({ match, series_winner_id, message });
       }
 
       if (match.leg === 3) {
-        message = 'Belle terminée';
-        await advanceWinner(champ, match.round_size, match.bracket_slot, winnerId, req.user.id);
-        return res.json({ match, series_winner_id: winnerId, message });
+        series_winner_id = legWinnerId;
+        message = 'Belle terminée — vainqueur qualifié';
+        await advanceWinner(
+          champ,
+          match.round_size,
+          match.bracket_slot,
+          series_winner_id,
+          req.user.id
+        );
+        return res.json({ match, series_winner_id, message });
       }
     }
 
-    // Single match libre ou championnat format single
-    if (champ && champ.format === 'single') {
-      await advanceWinner(champ, match.round_size, match.bracket_slot, winnerId, req.user.id);
-      message = 'Match terminé — vainqueur avancé si tableau';
+    // ——— Match unique (libre ou championnat single) ———
+    if (champ && (champ.format === 'single' || !match.series_key)) {
+      series_winner_id = legWinnerId;
+      await advanceWinner(
+        champ,
+        match.round_size,
+        match.bracket_slot,
+        legWinnerId,
+        req.user.id
+      );
+      message =
+        match.round_size === 2
+          ? 'Finale terminée — champion désigné'
+          : 'Match terminé — vainqueur qualifié pour le tour suivant';
+    } else if (!champ) {
+      message = 'Match libre terminé';
     }
 
-    res.json({ match, message });
+    res.json({ match, series_winner_id, message });
   } catch (err) {
     console.error('closeMatch', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 }
-
-async function advanceWinner(champ, roundSize, slot, winnerId, createdBy) {
-  if (!champ || !roundSize || slot == null) return;
-  const nextSize = roundSize / 2;
-  if (nextSize < 1) return;
-
-  const nextSlot = Math.floor(slot / 2);
-  // Trouver ou créer le match suivant
-  let next = await MatchPlayMatch.findOne({
-    where: {
-      championship_id: champ.id,
-      round_size: nextSize,
-      bracket_slot: nextSlot,
-      leg: 1,
-    },
-  });
-
-  if (!next) {
-    // Créer avec un seul joueur pour l'instant — on met winner en A ou B selon slot pair/impair
-    const isA = slot % 2 === 0;
-    next = await MatchPlayMatch.create({
-      championship_id: champ.id,
-      player_a_id: isA ? winnerId : winnerId, // placeholder both same until second arrives - fix below
-      player_b_id: winnerId,
-      round_size: nextSize,
-      bracket_slot: nextSlot,
-      leg: 1,
-      series_key: champ.format === 'home_away' ? `${champ.id}-R${nextSize}-S${nextSlot}` : null,
-      status: 'pending',
-      holes_data: [],
-      created_by: createdBy,
-    });
-    // Mark temporary: store winner only in correct side via update after create
-    if (isA) {
-      await next.update({ player_a_id: winnerId, player_b_id: winnerId });
-    } else {
-      await next.update({ player_a_id: winnerId, player_b_id: winnerId });
-    }
-  }
-
-  // Re-fetch and set correct player
-  next = await MatchPlayMatch.findOne({
-    where: {
-      championship_id: champ.id,
-      round_size: nextSize,
-      bracket_slot: nextSlot,
-      leg: 1,
-    },
-  });
-
-  const isA = slot % 2 === 0;
-  if (isA) {
-    await next.update({ player_a_id: winnerId });
-  } else {
-    await next.update({ player_b_id: winnerId });
-  }
-
-  // Si A et B sont distincts → prêt
-  const refreshed = await MatchPlayMatch.findByPk(next.id);
-  if (refreshed.player_a_id !== refreshed.player_b_id) {
-    await refreshed.update({ status: 'pending' });
-  }
-}
-
-// ——— Championnats ———
 
 async function listChampionships(req, res) {
   try {
@@ -376,7 +440,26 @@ async function getChampionship(req, res) {
         })
       : [];
 
-    res.json({ championship: c, players });
+    const n = entrantIds.length;
+    const bracketSize = n >= 2 ? nextPowerOf2(n) : 0;
+    const byes = bracketSize - n;
+
+    res.json({
+      championship: c,
+      players,
+      bracket_info: {
+        entrants: n,
+        bracket_size: bracketSize,
+        byes,
+        odd: n % 2 === 1,
+        message:
+          n < 2
+            ? 'Au moins 2 inscrits requis'
+            : byes > 0
+              ? `${n} inscrits → tableau de ${bracketSize} (${byes} qualification(s) d'office / bye). Les byes ne jouent pas contre eux-mêmes.`
+              : `${n} inscrits → tableau complet de ${bracketSize}`,
+      },
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -414,14 +497,33 @@ async function addEntrants(req, res) {
     }
     const set = new Set([...(c.entrants || []), ...ids]);
     await c.update({ entrants: [...set] });
-    res.json({ championship: c, message: 'Inscrits mis à jour' });
+    const n = set.size;
+    const bracketSize = nextPowerOf2(n);
+    const byes = bracketSize - n;
+    res.json({
+      championship: c,
+      message: 'Inscrits mis à jour',
+      bracket_info: {
+        entrants: n,
+        bracket_size: bracketSize,
+        byes,
+        odd: n % 2 === 1,
+        message:
+          byes > 0
+            ? `${n} inscrits → ${byes} bye(s) au 1er tour (qualification d'office)`
+            : `${n} inscrits → tableau complet`,
+      },
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 }
 
-/** Tirage + génération du 1er tour */
+/**
+ * Tirage : tableau puissance de 2.
+ * Byes = qualifications d'office (affichées clairement, pas de match contre soi-même).
+ */
 async function drawBracket(req, res) {
   try {
     const c = await MatchPlayChampionship.findByPk(req.params.id);
@@ -429,62 +531,74 @@ async function drawBracket(req, res) {
     if (c.status !== 'open') {
       return res.status(400).json({ error: 'Tableau déjà généré' });
     }
-    const entrants = shuffle(c.entrants || []);
-    if (entrants.length < 2) {
+
+    const raw = [...(c.entrants || [])];
+    if (raw.length < 2) {
       return res.status(400).json({ error: 'Au moins 2 inscrits' });
     }
 
+    const entrants = shuffle(raw);
     const size = nextPowerOf2(entrants.length);
-    // Byes : on place null pour les places manquantes
-    while (entrants.length < size) entrants.push(null);
+    const byesCount = size - entrants.length;
+
+    // Compléter avec null = bye
+    const bracket = [...entrants];
+    while (bracket.length < size) bracket.push(null);
 
     const created = [];
     for (let slot = 0; slot < size / 2; slot++) {
-      const a = entrants[slot * 2];
-      const b = entrants[slot * 2 + 1];
+      const a = bracket[slot * 2];
+      const b = bracket[slot * 2 + 1];
+      const key = c.format === 'home_away' ? seriesKey(c.id, size, slot) : null;
+
+      // Double vide (ne devrait pas arriver)
       if (!a && !b) continue;
+
+      // Bye : un seul joueur → qualifié d'office, avance au tour suivant
       if (a && !b) {
-        // Bye : vainqueur auto A → on crée un match closed
-        const m = await MatchPlayMatch.create({
+        const byeMatch = await MatchPlayMatch.create({
           championship_id: c.id,
           player_a_id: a,
-          player_b_id: a,
+          player_b_id: null,
           round_size: size,
           bracket_slot: slot,
           leg: 1,
-          series_key: c.format === 'home_away' ? `${c.id}-R${size}-S${slot}` : null,
+          series_key: key,
           status: 'closed',
           holes_data: [],
-          holes_won_a: 1,
+          holes_won_a: 0,
           holes_won_b: 0,
           winner_id: a,
+          is_bye: true,
           created_by: req.user.id,
         });
-        created.push(m);
+        created.push(byeMatch);
         await advanceWinner(c, size, slot, a, req.user.id);
         continue;
       }
       if (!a && b) {
-        const m = await MatchPlayMatch.create({
+        const byeMatch = await MatchPlayMatch.create({
           championship_id: c.id,
           player_a_id: b,
-          player_b_id: b,
+          player_b_id: null,
           round_size: size,
           bracket_slot: slot,
           leg: 1,
-          series_key: c.format === 'home_away' ? `${c.id}-R${size}-S${slot}` : null,
+          series_key: key,
           status: 'closed',
           holes_data: [],
-          holes_won_a: 1,
+          holes_won_a: 0,
           holes_won_b: 0,
           winner_id: b,
+          is_bye: true,
           created_by: req.user.id,
         });
-        created.push(m);
+        created.push(byeMatch);
         await advanceWinner(c, size, slot, b, req.user.id);
         continue;
       }
 
+      // Vrai duel
       const m = await MatchPlayMatch.create({
         championship_id: c.id,
         player_a_id: a,
@@ -492,16 +606,27 @@ async function drawBracket(req, res) {
         round_size: size,
         bracket_slot: slot,
         leg: 1,
-        series_key: c.format === 'home_away' ? `${c.id}-R${size}-S${slot}` : null,
+        series_key: key,
         status: 'pending',
         holes_data: [],
+        is_bye: false,
         created_by: req.user.id,
       });
       created.push(m);
     }
 
     await c.update({ status: 'in_progress' });
-    res.json({ message: 'Tirage effectué', matches_created: created.length, bracket_size: size });
+
+    res.json({
+      message: `Tirage effectué — tableau de ${size}${byesCount ? ` (${byesCount} bye(s))` : ''}`,
+      matches_created: created.length,
+      bracket_size: size,
+      byes: byesCount,
+      warning:
+        byesCount > 0
+          ? `${byesCount} joueur(s) qualifié(s) d'office pour le tour suivant (nombre d'inscrits non puissance de 2).`
+          : null,
+    });
   } catch (err) {
     console.error('drawBracket', err);
     res.status(500).json({ error: 'Erreur serveur' });
