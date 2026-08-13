@@ -9,6 +9,7 @@ router.use(authenticate);
 router.get('/', roundController.listRounds);
 router.get('/:id', roundController.getRound);
 
+// Création : admin pour libre/competition, tout joueur pour entrainement
 router.post('/', async (req, res, next) => {
   if (req.body?.type === 'entrainement') {
     return roundController.createRound(req, res, next);
@@ -22,7 +23,9 @@ router.post('/:id/players', requireRole('admin', 'super_admin'), roundController
 router.delete('/:id/players/:userId', requireRole('admin', 'super_admin'), roundController.removePlayer);
 
 router.put('/:id/scores', roundController.updateHoleScores);
+router.post('/:id/players/:userId/dnf', roundController.setPlayerDnf);
 
+// Clôture : super-admin OU joueur de la partie si entraînement
 router.post('/:id/close', async (req, res, next) => {
   try {
     if (req.user.role === 'super_admin') {
