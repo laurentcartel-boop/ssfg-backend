@@ -1,0 +1,21 @@
+const express = require('express');
+const router = express.Router();
+const ctrl = require('../controllers/matchPlayController');
+const { authenticate, requireRole } = require('../middleware/auth');
+
+router.use(authenticate);
+
+router.get('/matches', ctrl.listMatches);
+router.get('/matches/:id', ctrl.getMatch);
+router.post('/matches', ctrl.createLibreMatch);
+router.put('/matches/:id/holes', ctrl.updateMatchHoles);
+router.post('/matches/:id/close', ctrl.closeMatch);
+
+router.get('/championships', ctrl.listChampionships);
+router.get('/championships/:id', ctrl.getChampionship);
+router.post('/championships', requireRole('admin', 'super_admin'), ctrl.createChampionship);
+router.post('/championships/:id/entrants', requireRole('admin', 'super_admin'), ctrl.addEntrants);
+router.post('/championships/:id/draw', requireRole('admin', 'super_admin'), ctrl.drawBracket);
+router.post('/championships/:id/close', requireRole('super_admin'), ctrl.closeChampionship);
+
+module.exports = router;
