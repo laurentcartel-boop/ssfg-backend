@@ -37,13 +37,56 @@ app.use((err, req, res, next) => {
   });
 });
 
+async function migrateMatchPlay() {
+  const qi = sequelize.getQueryInterface();
+  const [tables] = await sequelize.query("SHOW TABLES LIKE 'matchplay_matches'");
+  if (!tables.length) return;
+
+  // Drop foreign keys on player columns (bloque le NULL)
+  const [fks] = await sequelize.query(`
+    SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'matchplay_matches'
+      AND REFERENCED_TABLE_NAME IS NOT NULL
+  `);
+  for (const row of fks) {
+    const name = row.CONSTRAINT_NAME || row.constraint_name;
+    try {
+      await sequelize.query(`ALTER TABLE matchplay_matches DROP FOREIGN KEY \`${name}\``);
+      console.log('FK dropped:', name);
+    } catch (e) {
+      console.warn('FK drop skip:', name, e.message);
+    }
+  }
+
+  // Nullable players + is_bye
+  try {
+    await sequelize.query('ALTER TABLE matchplay_matches MODIFY player_a_id CHAR(36) NULL');
+  } catch (e) {
+    console.warn('player_a_id:', e.message);
+  }
+  try {
+    await sequelize.query('ALTER TABLE matchplay_matches MODIFY player_b_id CHAR(36) NULL');
+  } catch (e) {
+    console.warn('player_b_id:', e.message);
+  }
+  try {
+    await sequelize.query(
+      "ALTER TABLE matchplay_matches ADD COLUMN is_bye TINYINT(1) NOT NULL DEFAULT 0"
+    );
+  } catch (e) {
+    // already exists
+  }
+}
+
 async function start() {
   try {
     await sequelize.authenticate();
     console.log('✅ Connexion base de données OK');
 
-    // alter: true ajoute les nouvelles colonnes (ex: competition_id) sans tout effacer
-    await sequelize.sync({ alter: true });
+    // Créer les tables manquantes sans alter (évite "Too many keys" MySQL)
+    await sequelize.sync();
+    await migrateMatchPlay();
     console.log('✅ Tables synchronisées');
 
     app.listen(PORT, () => {
@@ -54,5 +97,6 @@ async function start() {
     process.exit(1);
   }
 }
+
 
 start();
