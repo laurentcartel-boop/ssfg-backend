@@ -19,6 +19,7 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', app: 'FootGolf Scoring SSFG', version: '1.0.0' });
 });
 
+app.use('/api/public', require('./routes/public'));
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/courses', require('./routes/courses'));
