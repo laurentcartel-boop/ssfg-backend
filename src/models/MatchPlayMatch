@@ -3,7 +3,8 @@ const sequelize = require('../config/database');
 
 /**
  * holes_data: [{ hole: 1, result: 'a'|'b'|'half' }, ...]
- * result par trou : a = joueur A gagne, b = joueur B, half = partagé
+ * is_bye: qualification automatique (nombre impair) — pas un vrai match
+ * player_b_id null = en attente de l'autre vainqueur du tour précédent
  */
 const MatchPlayMatch = sequelize.define(
   'MatchPlayMatch',
@@ -13,20 +14,18 @@ const MatchPlayMatch = sequelize.define(
       defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
     },
-    /** null = partie libre */
     championship_id: {
       type: DataTypes.UUID,
       allowNull: true,
     },
     player_a_id: {
       type: DataTypes.UUID,
-      allowNull: false,
+      allowNull: true,
     },
     player_b_id: {
       type: DataTypes.UUID,
-      allowNull: false,
+      allowNull: true,
     },
-    /** Tour du tableau : 1 = 1er tour, 2, 4, 8... (taille du côté) */
     round_size: {
       type: DataTypes.INTEGER,
       allowNull: true,
@@ -35,13 +34,11 @@ const MatchPlayMatch = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: true,
     },
-    /** 1 = aller, 2 = retour, 3 = belle */
     leg: {
       type: DataTypes.INTEGER,
       allowNull: false,
       defaultValue: 1,
     },
-    /** Lien entre aller / retour / belle */
     series_key: {
       type: DataTypes.STRING(64),
       allowNull: true,
@@ -69,6 +66,11 @@ const MatchPlayMatch = sequelize.define(
     winner_id: {
       type: DataTypes.UUID,
       allowNull: true,
+    },
+    is_bye: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
     },
     created_by: {
       type: DataTypes.UUID,
