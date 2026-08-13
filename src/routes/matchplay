@@ -17,5 +17,7 @@ router.post('/championships', requireRole('admin', 'super_admin'), ctrl.createCh
 router.post('/championships/:id/entrants', requireRole('admin', 'super_admin'), ctrl.addEntrants);
 router.post('/championships/:id/draw', requireRole('admin', 'super_admin'), ctrl.drawBracket);
 router.post('/championships/:id/close', requireRole('super_admin'), ctrl.closeChampionship);
+router.delete('/championships/:id', requireRole('super_admin'), ctrl.deleteChampionship);
+router.delete('/matches/:id', requireRole('super_admin'), ctrl.deleteMatch);
 
 module.exports = router;
