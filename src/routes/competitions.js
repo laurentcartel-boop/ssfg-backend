@@ -10,5 +10,6 @@ router.get('/:id', competitionController.getCompetition);
 router.post('/', requireRole('admin', 'super_admin'), competitionController.createCompetition);
 router.post('/:id/squads', requireRole('admin', 'super_admin'), competitionController.addSquad);
 router.post('/:id/close', requireRole('super_admin'), competitionController.closeCompetition);
+router.delete('/:id', requireRole('super_admin'), competitionController.deleteCompetition);
 
 module.exports = router;
