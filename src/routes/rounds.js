@@ -23,6 +23,7 @@ router.post('/:id/players', requireRole('admin', 'super_admin'), roundController
 router.delete('/:id/players/:userId', requireRole('admin', 'super_admin'), roundController.removePlayer);
 
 router.put('/:id/scores', roundController.updateHoleScores);
+router.delete('/:id', requireRole('super_admin'), roundController.deleteRound);
 router.post('/:id/players/:userId/dnf', roundController.setPlayerDnf);
 
 // Clôture : super-admin OU joueur de la partie si entraînement
