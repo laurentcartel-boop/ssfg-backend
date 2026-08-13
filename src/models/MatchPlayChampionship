@@ -1,0 +1,49 @@
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
+
+const MatchPlayChampionship = sequelize.define(
+  'MatchPlayChampionship',
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    name: {
+      type: DataTypes.STRING(200),
+      allowNull: false,
+    },
+    /** single = 1 match | home_away = aller-retour (+ belle si égalité) */
+    format: {
+      type: DataTypes.ENUM('single', 'home_away'),
+      allowNull: false,
+      defaultValue: 'single',
+    },
+    status: {
+      type: DataTypes.ENUM('open', 'in_progress', 'closed'),
+      allowNull: false,
+      defaultValue: 'open',
+    },
+    /** JSON array of user UUIDs registered */
+    entrants: {
+      type: DataTypes.JSON,
+      allowNull: false,
+      defaultValue: [],
+    },
+    created_by: {
+      type: DataTypes.UUID,
+      allowNull: false,
+    },
+    closed_by: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+    closed_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+  },
+  { tableName: 'matchplay_championships' }
+);
+
+module.exports = MatchPlayChampionship;
