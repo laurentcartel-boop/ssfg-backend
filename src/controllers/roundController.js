@@ -344,10 +344,38 @@ async function closeRound(req, res) {
 
     for (const rp of round.players) {
       const scores = rp.holeScores || [];
+
+      // DNF : score partiel conservé, pas de validation index
+      if (rp.dnf) {
+        const partial = scores.reduce((sum, hs) => sum + hs.score, 0);
+        const thru = scores.length;
+        await rp.update(
+          {
+            total_score: thru > 0 ? partial : null,
+            score_to_par: null,
+            net_score: null,
+            index_change: null,
+            new_index: Number(rp.starting_index),
+          },
+          { transaction: t }
+        );
+        updates.push({
+          user_id: rp.user_id,
+          name: `${rp.user.first_name} ${rp.user.last_name}`,
+          total_score: thru > 0 ? partial : null,
+          score_to_par: null,
+          index_change: null,
+          new_index: Number(rp.starting_index),
+          dnf: true,
+          holes_played: thru,
+        });
+        continue;
+      }
+
       if (scores.length < 18) {
         await t.rollback();
         return res.status(400).json({
-          error: `Le joueur ${rp.user.first_name} ${rp.user.last_name} n'a pas 18 trous saisis (${scores.length}/18)`,
+          error: `Le joueur ${rp.user.first_name} ${rp.user.last_name} n'a pas 18 trous saisis (${scores.length}/18). Marquez-le DNF s'il abandonne.`,
         });
       }
 
@@ -405,6 +433,7 @@ async function closeRound(req, res) {
         score_to_par: scoreToPar,
         index_change: change,
         new_index: newIndex,
+        dnf: false,
       });
     }
 
@@ -464,7 +493,46 @@ async function removePlayer(req, res) {
   }
 }
 
+
+/**
+ * POST /api/rounds/:id/players/:userId/dnf
+ * Marquer / retirer DNF (Did Not Finish) — admin ou joueur de la partie
+ */
+async function setPlayerDnf(req, res) {
+  try {
+    const round = await Round.findByPk(req.params.id, {
+      include: [{ model: RoundPlayer, as: 'players', include: [{ model: User, as: 'user' }] }],
+    });
+    if (!round) return res.status(404).json({ error: 'Partie non trouvée' });
+    if (round.status === 'closed') {
+      return res.status(400).json({ error: 'Partie déjà clôturée' });
+    }
+
+    const rp = (round.players || []).find((p) => p.user_id === req.params.userId);
+    if (!rp) return res.status(404).json({ error: 'Joueur absent de la partie' });
+
+    const dnf = req.body?.dnf !== undefined ? Boolean(req.body.dnf) : !rp.dnf;
+    await rp.update({ dnf });
+
+    res.json({
+      message: dnf
+        ? `${rp.user?.last_name || 'Joueur'} marqué DNF (score non compté pour l'index)`
+        : `DNF retiré pour ${rp.user?.last_name || 'joueur'}`,
+      player: {
+        user_id: rp.user_id,
+        dnf,
+        last_name: rp.user?.last_name,
+        first_name: rp.user?.first_name,
+      },
+    });
+  } catch (err) {
+    console.error('setPlayerDnf error:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
 module.exports = {
+  setPlayerDnf,
   listRounds,
   getRound,
   createRound,
