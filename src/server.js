@@ -86,6 +86,19 @@ async function start() {
     console.log('✅ Connexion base de données OK');
 
     // Créer les tables manquantes sans alter (évite "Too many keys" MySQL)
+    // Si round_comments a été créée incomplète (sans timestamps), on la recrée
+    try {
+      const [cols] = await sequelize.query(
+        "SHOW COLUMNS FROM round_comments LIKE 'createdAt'"
+      );
+      if (!cols.length) {
+        await sequelize.query('DROP TABLE IF EXISTS round_comments');
+        console.log('♻️  round_comments recreée (timestamps manquants)');
+      }
+    } catch (e) {
+      // table absente → sync la créera
+    }
+
     try {
       await sequelize.sync();
       console.log('✅ sequelize.sync OK');
