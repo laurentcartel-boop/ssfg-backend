@@ -11,6 +11,7 @@ const MatchPlayChampionship = require('./MatchPlayChampionship');
 const MatchPlayMatch = require('./MatchPlayMatch');
 const AccountingEntry = require('./AccountingEntry');
 const RoundComment = require('./RoundComment');
+const RoundExploit = require('./RoundExploit');
 
 // Users / Rounds
 User.hasMany(Round, { foreignKey: 'created_by', as: 'createdRounds' });
@@ -64,6 +65,11 @@ AccountingEntry.belongsTo(User, { foreignKey: 'created_by', as: 'creator', const
 Round.hasMany(RoundComment, { foreignKey: 'round_id', as: 'comments', constraints: false });
 RoundComment.belongsTo(Round, { foreignKey: 'round_id', as: 'round', constraints: false });
 RoundComment.belongsTo(User, { foreignKey: 'user_id', as: 'user', constraints: false });
+Round.hasMany(RoundExploit, { foreignKey: 'round_id', as: 'exploits', constraints: false });
+RoundExploit.belongsTo(Round, { foreignKey: 'round_id', as: 'round', constraints: false });
+RoundExploit.belongsTo(User, { foreignKey: 'user_id', as: 'user', constraints: false });
+RoundExploit.belongsTo(User, { foreignKey: 'created_by', as: 'creator', constraints: false });
+
 
 
 module.exports = {
@@ -80,4 +86,5 @@ module.exports = {
   MatchPlayMatch,
   AccountingEntry,
   RoundComment,
+  RoundExploit,
 };
