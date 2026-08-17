@@ -24,7 +24,9 @@ const RoundComment = sequelize.define(
   },
   {
     tableName: 'round_comments',
-    indexes: [{ fields: ['round_id'] }, { fields: ['createdAt'] }],
+    // Pas d'index sur createdAt : MySQL / sync plante si la colonne timestamps
+    // n'est pas encore alignée (createdAt vs created_at)
+    indexes: [{ fields: ['round_id'] }],
   }
 );
 
