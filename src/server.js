@@ -94,6 +94,18 @@ async function start() {
       if (!cols.length) {
         await sequelize.query('DROP TABLE IF EXISTS round_comments');
         console.log('♻️  round_comments recreée (timestamps manquants)');
+      } else {
+        // ajouter display_name / user_id nullable si besoin
+        try {
+          await sequelize.query(
+            'ALTER TABLE round_comments ADD COLUMN display_name VARCHAR(40) NULL'
+          );
+        } catch (e) {}
+        try {
+          await sequelize.query(
+            'ALTER TABLE round_comments MODIFY user_id CHAR(36) NULL'
+          );
+        } catch (e) {}
       }
     } catch (e) {
       // table absente → sync la créera
