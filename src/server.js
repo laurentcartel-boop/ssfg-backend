@@ -86,15 +86,27 @@ async function start() {
     console.log('✅ Connexion base de données OK');
 
     // Créer les tables manquantes sans alter (évite "Too many keys" MySQL)
-    await sequelize.sync();
-    await migrateMatchPlay();
+    try {
+      await sequelize.sync();
+      console.log('✅ sequelize.sync OK');
+    } catch (syncErr) {
+      console.error('❌ sequelize.sync:', syncErr);
+      throw syncErr;
+    }
+    try {
+      await migrateMatchPlay();
+    } catch (migErr) {
+      console.warn('⚠️ migrateMatchPlay:', migErr.message || migErr);
+    }
     console.log('✅ Tables synchronisées');
 
     app.listen(PORT, () => {
       console.log(`🚀 Serveur démarré sur le port ${PORT}`);
     });
   } catch (err) {
-    console.error('❌ Impossible de démarrer:', err.message);
+    console.error('❌ Impossible de démarrer:', err && err.message ? err.message : err);
+    if (err && err.stack) console.error(err.stack);
+    if (err && err.parent) console.error('SQL:', err.parent.message || err.parent);
     process.exit(1);
   }
 }
