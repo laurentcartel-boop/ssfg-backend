@@ -576,6 +576,7 @@ async function listComments(req, res) {
         id: c.id,
         message: c.message,
         created_at: c.createdAt,
+        display_name: c.display_name,
         user: c.user,
       })),
     });
@@ -604,6 +605,7 @@ async function addComment(req, res) {
     const c = await RoundComment.create({
       round_id: round.id,
       user_id: req.user.id,
+      display_name: null,
       message,
     });
     const user = await User.findByPk(req.user.id, {
@@ -614,6 +616,7 @@ async function addComment(req, res) {
         id: c.id,
         message: c.message,
         created_at: c.createdAt,
+        display_name: null,
         user,
       },
     });
@@ -630,7 +633,14 @@ async function deleteComment(req, res) {
       return res.status(404).json({ error: 'Commentaire introuvable' });
     }
     const isAdmin = ['admin', 'super_admin'].includes(req.user.role);
-    if (!isAdmin && c.user_id !== req.user.id) {
+    const round = await Round.findByPk(req.params.id, {
+      include: [{ model: RoundPlayer, as: 'players' }],
+    });
+    const isPlayer =
+      round &&
+      (round.players || []).some((p) => p.user_id === req.user.id);
+    // Modération : admin, joueur de la partie, ou auteur du message
+    if (!isAdmin && !isPlayer && c.user_id !== req.user.id) {
       return res.status(403).json({ error: 'Non autorisé' });
     }
     await c.destroy();
