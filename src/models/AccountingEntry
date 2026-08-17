@@ -1,0 +1,83 @@
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
+
+/**
+ * Écriture comptable asso (livre journal simplifié)
+ * type: RECETTE | DEPENSE | REPORT
+ */
+const AccountingEntry = sequelize.define(
+  'AccountingEntry',
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    year: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
+    entry_date: {
+      type: DataTypes.DATEONLY,
+      allowNull: false,
+    },
+    label: {
+      type: DataTypes.STRING(500),
+      allowNull: false,
+    },
+    ag_label: {
+      type: DataTypes.STRING(120),
+      allowNull: true,
+    },
+    account_number: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+    },
+    account_title: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+    },
+    amount: {
+      type: DataTypes.DECIMAL(12, 2),
+      allowNull: false,
+      defaultValue: 0,
+    },
+    recipes: {
+      type: DataTypes.DECIMAL(12, 2),
+      allowNull: false,
+      defaultValue: 0,
+    },
+    expenses: {
+      type: DataTypes.DECIMAL(12, 2),
+      allowNull: false,
+      defaultValue: 0,
+    },
+    entry_type: {
+      type: DataTypes.ENUM('RECETTE', 'DEPENSE', 'REPORT'),
+      allowNull: false,
+      defaultValue: 'DEPENSE',
+    },
+    journal_number: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+    },
+    notes: {
+      type: DataTypes.STRING(500),
+      allowNull: true,
+    },
+    created_by: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+  },
+  {
+    tableName: 'accounting_entries',
+    indexes: [
+      { fields: ['year'] },
+      { fields: ['entry_date'] },
+      { fields: ['entry_type'] },
+    ],
+  }
+);
+
+module.exports = AccountingEntry;
