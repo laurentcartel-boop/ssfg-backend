@@ -140,4 +140,29 @@ router.get('/rounds/:id', async (req, res) => {
   }
 });
 
+
+router.get('/rounds/:id/comments', async (req, res) => {
+  try {
+    const { RoundComment, User } = require('../models');
+    const comments = await RoundComment.findAll({
+      where: { round_id: req.params.id },
+      include: [{ model: User, as: 'user', attributes: ['id', 'first_name', 'last_name'] }],
+      order: [['createdAt', 'ASC']],
+      limit: 100,
+    });
+    res.json({
+      comments: comments.map((c) => ({
+        id: c.id,
+        message: c.message,
+        created_at: c.createdAt,
+        user: c.user,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 module.exports = router;
+
