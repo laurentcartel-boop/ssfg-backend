@@ -165,6 +165,31 @@ router.get('/rounds/:id/comments', async (req, res) => {
   }
 });
 
+router.get('/rounds/:id/exploits', async (req, res) => {
+  try {
+    const { RoundExploit, User } = require('../models');
+    const exploits = await RoundExploit.findAll({
+      where: { round_id: req.params.id },
+      include: [{ model: User, as: 'user', attributes: ['id', 'first_name', 'last_name'] }],
+      order: [['hole_number', 'ASC'], ['createdAt', 'ASC']],
+    });
+    res.json({
+      exploits: exploits.map((e) => ({
+        id: e.id,
+        hole_number: e.hole_number,
+        exploit_type: e.exploit_type,
+        comment: e.comment,
+        image_url: e.image_url,
+        created_at: e.createdAt,
+        user: e.user,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 /** Post public (sans login) — pseudo + message */
 router.post('/rounds/:id/comments', async (req, res) => {
   try {
@@ -217,3 +242,4 @@ router.post('/rounds/:id/comments', async (req, res) => {
 /** Suppression publique par token simple non — géré côté auth rounds */
 
 module.exports = router;
+
