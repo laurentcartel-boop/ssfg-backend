@@ -9,6 +9,7 @@ const Competition = require('./Competition');
 const Article = require('./Article');
 const MatchPlayChampionship = require('./MatchPlayChampionship');
 const MatchPlayMatch = require('./MatchPlayMatch');
+const AccountingEntry = require('./AccountingEntry');
 
 // Users / Rounds
 User.hasMany(Round, { foreignKey: 'created_by', as: 'createdRounds' });
@@ -57,6 +58,7 @@ MatchPlayMatch.belongsTo(User, { foreignKey: 'player_a_id', as: 'playerA', const
 MatchPlayMatch.belongsTo(User, { foreignKey: 'player_b_id', as: 'playerB', constraints: false });
 MatchPlayMatch.belongsTo(User, { foreignKey: 'winner_id', as: 'winner', constraints: false });
 MatchPlayMatch.belongsTo(User, { foreignKey: 'created_by', as: 'creator', constraints: false });
+AccountingEntry.belongsTo(User, { foreignKey: 'created_by', as: 'creator', constraints: false });
 
 module.exports = {
   sequelize,
@@ -70,4 +72,5 @@ module.exports = {
   Article,
   MatchPlayChampionship,
   MatchPlayMatch,
+  AccountingEntry,
 };
