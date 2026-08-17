@@ -6,6 +6,7 @@ const {
   User,
   IndexHistory,
   RoundComment,
+  RoundExploit,
   sequelize,
 } = require('../models');
 const { calculateIndexChange } = require('../services/indexService');
@@ -651,12 +652,110 @@ async function deleteComment(req, res) {
   }
 }
 
+
+async function listExploits(req, res) {
+  try {
+    const exploits = await RoundExploit.findAll({
+      where: { round_id: req.params.id },
+      include: [{ model: User, as: 'user', attributes: ['id', 'first_name', 'last_name'] }],
+      order: [['hole_number', 'ASC'], ['createdAt', 'ASC']],
+    });
+    res.json({
+      exploits: exploits.map((e) => ({
+        id: e.id,
+        hole_number: e.hole_number,
+        exploit_type: e.exploit_type,
+        comment: e.comment,
+        image_url: e.image_url,
+        created_at: e.createdAt,
+        user: e.user,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function addExploit(req, res) {
+  try {
+    const round = await Round.findByPk(req.params.id, {
+      include: [{ model: RoundPlayer, as: 'players' }],
+    });
+    if (!round) return res.status(404).json({ error: 'Partie non trouvée' });
+    const isAdmin = ['admin', 'super_admin'].includes(req.user.role);
+    const isPlayer = (round.players || []).some((p) => p.user_id === req.user.id);
+    if (!isAdmin && !isPlayer) {
+      return res.status(403).json({ error: 'Réservé aux joueurs de la partie' });
+    }
+    const hole_number = parseInt(req.body.hole_number, 10);
+    const exploit_type = String(req.body.exploit_type || '').toLowerCase();
+    const allowed = ['hole_in_one', 'albatross', 'eagle'];
+    if (!allowed.includes(exploit_type)) {
+      return res.status(400).json({ error: 'Type: hole_in_one, albatross ou eagle' });
+    }
+    if (!hole_number || hole_number < 1 || hole_number > 18) {
+      return res.status(400).json({ error: 'Trou invalide' });
+    }
+    let user_id = req.body.user_id || req.user.id;
+    if (!isAdmin && user_id !== req.user.id) {
+      // joueur peut enregistrer pour un partenaire du squad
+      const ok = (round.players || []).some((p) => p.user_id === user_id);
+      if (!ok) return res.status(403).json({ error: 'Joueur hors partie' });
+    }
+    const e = await RoundExploit.create({
+      round_id: round.id,
+      user_id,
+      hole_number,
+      exploit_type,
+      comment: req.body.comment ? String(req.body.comment).slice(0, 280) : null,
+      image_url: req.body.image_url || null,
+      created_by: req.user.id,
+    });
+    const user = await User.findByPk(user_id, {
+      attributes: ['id', 'first_name', 'last_name'],
+    });
+    res.status(201).json({
+      exploit: {
+        id: e.id,
+        hole_number: e.hole_number,
+        exploit_type: e.exploit_type,
+        comment: e.comment,
+        image_url: e.image_url,
+        created_at: e.createdAt,
+        user,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function deleteExploit(req, res) {
+  try {
+    const e = await RoundExploit.findByPk(req.params.exploitId);
+    if (!e || e.round_id !== req.params.id) {
+      return res.status(404).json({ error: 'Exploit introuvable' });
+    }
+    const isAdmin = ['admin', 'super_admin'].includes(req.user.role);
+    const round = await Round.findByPk(req.params.id, {
+      include: [{ model: RoundPlayer, as: 'players' }],
+    });
+    const isPlayer =
+      round && (round.players || []).some((p) => p.user_id === req.user.id);
+    if (!isAdmin && !isPlayer && e.created_by !== req.user.id && e.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Non autorisé' });
+    }
+    await e.destroy();
+    res.json({ message: 'Exploit supprimé' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
 module.exports = {
-  listComments,
-  addComment,
-  deleteComment,
-  setPlayerDnf,
-  deleteRound,
   listRounds,
   getRound,
   createRound,
@@ -664,4 +763,12 @@ module.exports = {
   removePlayer,
   updateHoleScores,
   closeRound,
+  setPlayerDnf,
+  deleteRound,
+  listComments,
+  addComment,
+  deleteComment,
+  listExploits,
+  addExploit,
+  deleteExploit,
 };
