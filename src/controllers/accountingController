@@ -82,46 +82,95 @@ function parseCsv(text) {
   return rows;
 }
 
-function mapRow(raw, defaultYear) {
-  const recipes = num(raw.Recettes ?? raw.recettes ?? raw.recipes ?? raw['Banque Recettes']);
-  const expenses = num(raw.Dépenses ?? raw.Depenses ?? raw.depenses ?? raw.expenses ?? raw['Banque Dépenses']);
-  let amount = num(raw.Montant ?? raw.montant ?? raw.amount);
-  if (!amount) amount = Math.max(recipes, expenses);
-  const entry_date =
-    parseDate(raw.Date ?? raw.date ?? raw.entry_date) ||
-    (defaultYear ? `${defaultYear}-01-01` : null);
-  const label =
-    raw.Libellé ||
-    raw.Libelle ||
-    raw.libelle ||
-    raw.label ||
-    raw['Libellé pour AG'] ||
-    'Écriture';
-  if (!entry_date || !label || isJunkLabel(label)) return null;
-  // ignorer lignes vides / Excel pourries
-  if (amount === 0 && recipes === 0 && expenses === 0) {
-    const lab = String(label).trim();
-    if (!lab || lab === 'Écriture' || /^#/.test(lab)) return null;
+function pick(raw, keys) {
+  for (const k of keys) {
+    if (raw[k] !== undefined && raw[k] !== null && String(raw[k]).trim() !== '') {
+      return raw[k];
+    }
   }
-  const entry_type = detectType({
-    ...raw,
+  // match header keys case-insensitive / accent-insensitive-ish
+  const entries = Object.entries(raw);
+  for (const want of keys) {
+    const w = String(want).toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+    for (const [k, v] of entries) {
+      const kk = String(k).toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+      if (kk === w || kk.includes(w)) {
+        if (v !== undefined && v !== null && String(v).trim() !== '') return v;
+      }
+    }
+  }
+  return undefined;
+}
+
+function mapRow(raw, defaultYear) {
+  let recipes = num(
+    pick(raw, ['Recettes', 'recettes', 'recipes', 'Banque Recettes', 'Banque recettes'])
+  );
+  let expenses = num(
+    pick(raw, ['Dépenses', 'Depenses', 'depenses', 'expenses', 'Banque Dépenses', 'Banque Depenses'])
+  );
+  let amount = num(pick(raw, ['Montant', 'montant', 'amount']));
+  if (!amount) amount = Math.max(recipes, expenses);
+
+  const entry_date =
+    parseDate(pick(raw, ['Date', 'date', 'entry_date'])) ||
+    (defaultYear ? `${defaultYear}-01-01` : null);
+
+  const label = pick(raw, [
+    'Libellé',
+    'Libelle',
+    'libelle',
+    'label',
+    'Libellé pour AG',
+    'Libelle pour AG',
+  ]) || 'Écriture';
+
+  if (!entry_date || isJunkLabel(label)) return null;
+  if (amount === 0 && recipes === 0 && expenses === 0) return null;
+
+  const account_number = String(
+    pick(raw, ['N° compte', 'N compte', 'Compte', 'account_number', 'compte']) || ''
+  ).slice(0, 20) || null;
+
+  let entry_type = detectType({
+    entry_type: pick(raw, ['Type', 'type', 'entry_type', 'Classe']),
     recipes,
     expenses,
-    account_number: raw['N° compte'] || raw.account_number || raw.Compte,
+    account_number,
   });
+
+  // Si Type/Classe = CHARGES → dépense ; PRODUITS → recette
+  const classe = String(pick(raw, ['Classe', 'classe', 'Type', 'type']) || '').toUpperCase();
+  if (classe.includes('CHARGE')) entry_type = 'DEPENSE';
+  if (classe.includes('PRODUIT')) entry_type = 'RECETTE';
+  if (classe.includes('REPORT') || String(account_number || '').startsWith('11')) entry_type = 'REPORT';
+
+  // Répartir le montant si recettes/dépenses vides
+  if (entry_type === 'RECETTE') {
+    if (!recipes) recipes = amount;
+  } else if (entry_type === 'DEPENSE') {
+    if (!expenses) expenses = amount;
+  } else if (entry_type === 'REPORT') {
+    // report à nouveau créditeur souvent en recettes
+    if (!recipes && !expenses) recipes = amount;
+  }
+
   const year = defaultYear || Number(String(entry_date).slice(0, 4));
+  const ag = pick(raw, ['Libellé pour AG', 'Libelle pour AG', 'ag_label']);
   return {
     year,
     entry_date,
     label: String(label).slice(0, 500),
-    ag_label: (raw['Libellé pour AG'] || raw.ag_label || raw['Libelle pour AG'] || null)?.slice?.(0, 120) || null,
-    account_number: String(raw['N° compte'] || raw.account_number || raw.Compte || '').slice(0, 20) || null,
-    account_title: String(raw.Intitulé || raw.Intitule || raw.account_title || raw['Intitulé complet'] || '').slice(0, 255) || null,
-    amount,
-    recipes: entry_type === 'RECETTE' ? recipes || amount : recipes,
-    expenses: entry_type === 'DEPENSE' ? expenses || amount : expenses,
+    ag_label: ag ? String(ag).slice(0, 120) : null,
+    account_number,
+    account_title: String(
+      pick(raw, ['Intitulé', 'Intitule', 'account_title', 'Intitulé complet', 'Intitule complet']) || ''
+    ).slice(0, 255) || null,
+    amount: amount || recipes || expenses,
+    recipes,
+    expenses,
     entry_type,
-    journal_number: String(raw['N°'] || raw.N || raw.journal_number || '').slice(0, 20) || null,
+    journal_number: String(pick(raw, ['N°', 'N', 'journal_number', 'No']) || '').slice(0, 20) || null,
   };
 }
 
@@ -157,12 +206,17 @@ async function summary(req, res) {
     let suspicious = 0;
 
     for (const e of entries) {
-      const r = Number(e.recipes) || 0;
-      const x = Number(e.expenses) || 0;
+      let r = Number(e.recipes) || 0;
+      let x = Number(e.expenses) || 0;
+      const amt = Number(e.amount) || 0;
       if (e.entry_type === 'REPORT') {
-        // Report : en général créditeur en "recettes" (solde ouverture banque)
+        if (!r && !x && amt) r = amt;
         reportAmount += r - x;
         continue;
+      }
+      if (!r && !x && amt) {
+        if (e.entry_type === 'RECETTE') r = amt;
+        else x = amt;
       }
       totalRecipes += r;
       totalExpenses += x;
