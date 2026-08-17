@@ -5,6 +5,7 @@ const {
   Course,
   User,
   IndexHistory,
+  RoundComment,
   sequelize,
 } = require('../models');
 const { calculateIndexChange } = require('../services/indexService');
@@ -560,7 +561,90 @@ async function deleteRound(req, res) {
   }
 }
 
+
+
+async function listComments(req, res) {
+  try {
+    const comments = await RoundComment.findAll({
+      where: { round_id: req.params.id },
+      include: [{ model: User, as: 'user', attributes: ['id', 'first_name', 'last_name'] }],
+      order: [['createdAt', 'ASC']],
+      limit: 100,
+    });
+    res.json({
+      comments: comments.map((c) => ({
+        id: c.id,
+        message: c.message,
+        created_at: c.createdAt,
+        user: c.user,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function addComment(req, res) {
+  try {
+    const round = await Round.findByPk(req.params.id, {
+      include: [{ model: RoundPlayer, as: 'players' }],
+    });
+    if (!round) return res.status(404).json({ error: 'Partie non trouvée' });
+    if (round.status === 'closed') {
+      return res.status(400).json({ error: 'Partie clôturée' });
+    }
+    const isAdmin = ['admin', 'super_admin'].includes(req.user.role);
+    const isPlayer = (round.players || []).some((p) => p.user_id === req.user.id);
+    if (!isAdmin && !isPlayer) {
+      return res.status(403).json({ error: 'Réservé aux joueurs de la partie' });
+    }
+    const message = String(req.body.message || '').trim().slice(0, 280);
+    if (!message) return res.status(400).json({ error: 'Message vide' });
+    const c = await RoundComment.create({
+      round_id: round.id,
+      user_id: req.user.id,
+      message,
+    });
+    const user = await User.findByPk(req.user.id, {
+      attributes: ['id', 'first_name', 'last_name'],
+    });
+    res.status(201).json({
+      comment: {
+        id: c.id,
+        message: c.message,
+        created_at: c.createdAt,
+        user,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function deleteComment(req, res) {
+  try {
+    const c = await RoundComment.findByPk(req.params.commentId);
+    if (!c || c.round_id !== req.params.id) {
+      return res.status(404).json({ error: 'Commentaire introuvable' });
+    }
+    const isAdmin = ['admin', 'super_admin'].includes(req.user.role);
+    if (!isAdmin && c.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Non autorisé' });
+    }
+    await c.destroy();
+    res.json({ message: 'Commentaire supprimé' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
 module.exports = {
+  listComments,
+  addComment,
+  deleteComment,
   setPlayerDnf,
   deleteRound,
   listRounds,
