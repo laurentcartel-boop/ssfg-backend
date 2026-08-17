@@ -53,7 +53,7 @@ const AccountingEntry = sequelize.define(
       defaultValue: 0,
     },
     entry_type: {
-      type: DataTypes.ENUM('RECETTE', 'DEPENSE', 'REPORT'),
+      type: DataTypes.STRING(20),
       allowNull: false,
       defaultValue: 'DEPENSE',
     },
