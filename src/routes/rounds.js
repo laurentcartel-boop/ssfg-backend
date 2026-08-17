@@ -7,6 +7,9 @@ const { Round, RoundPlayer } = require('../models');
 router.use(authenticate);
 
 router.get('/', roundController.listRounds);
+router.get('/:id/comments', roundController.listComments);
+router.post('/:id/comments', roundController.addComment);
+router.delete('/:id/comments/:commentId', roundController.deleteComment);
 router.get('/:id', roundController.getRound);
 
 // Création : admin pour libre/competition, tout joueur pour entrainement
