@@ -3,8 +3,24 @@ const { AccountingEntry, User } = require('../models');
 
 function num(v) {
   if (v === null || v === undefined || v === '') return 0;
-  const n = Number(String(v).replace(',', '.').replace(/\s/g, ''));
+  let s = String(v).trim();
+  // Erreurs Excel / cellules invalides
+  if (/^#+(VALUE|DIV|REF|N\/A|NAME|NULL|NUM|GETTING_DATA)!?$/i.test(s)) return 0;
+  if (/^#Value$/i.test(s) || s === '#VALUE!' || s === '#Value') return 0;
+  if (s === '-' || s === '—' || s === '–') return 0;
+  s = s.replace(/\s/g, '').replace(',', '.').replace(/€/g, '');
+  // enlever espaces insécables
+  s = s.replace(/\u00a0/g, '');
+  const n = Number(s);
   return Number.isFinite(n) ? n : 0;
+}
+
+function isJunkLabel(label) {
+  const s = String(label || '').trim();
+  if (!s) return true;
+  if (/^#/.test(s)) return true;
+  if (/^n°?\s*$/i.test(s)) return true;
+  return false;
 }
 
 function detectType(row) {
@@ -81,11 +97,11 @@ function mapRow(raw, defaultYear) {
     raw.label ||
     raw['Libellé pour AG'] ||
     'Écriture';
-  if (!entry_date || !label) return null;
-  // ignorer lignes vides
+  if (!entry_date || !label || isJunkLabel(label)) return null;
+  // ignorer lignes vides / Excel pourries
   if (amount === 0 && recipes === 0 && expenses === 0) {
     const lab = String(label).trim();
-    if (!lab || lab === 'Écriture') return null;
+    if (!lab || lab === 'Écriture' || /^#/.test(lab)) return null;
   }
   const entry_type = detectType({
     ...raw,
@@ -135,15 +151,22 @@ async function summary(req, res) {
     const entries = await AccountingEntry.findAll({ where: { year } });
     let totalRecipes = 0;
     let totalExpenses = 0;
+    let reportAmount = 0; // solde d'ouverture / report à nouveau (recettes de type REPORT)
     const byAg = {};
     const byAccount = {};
+    let suspicious = 0;
+
     for (const e of entries) {
-      if (e.entry_type === 'REPORT') continue;
       const r = Number(e.recipes) || 0;
       const x = Number(e.expenses) || 0;
+      if (e.entry_type === 'REPORT') {
+        // Report : en général créditeur en "recettes" (solde ouverture banque)
+        reportAmount += r - x;
+        continue;
+      }
       totalRecipes += r;
       totalExpenses += x;
-      const ag = e.ag_label || e.label || 'Divers';
+      const ag = e.ag_label || 'Divers';
       if (!byAg[ag]) byAg[ag] = { recipes: 0, expenses: 0 };
       byAg[ag].recipes += r;
       byAg[ag].expenses += x;
@@ -151,15 +174,38 @@ async function summary(req, res) {
       if (!byAccount[acc]) byAccount[acc] = { title: e.account_title, recipes: 0, expenses: 0 };
       byAccount[acc].recipes += r;
       byAccount[acc].expenses += x;
+      if (String(e.label || '').startsWith('#')) suspicious += 1;
     }
+
+    const result = Math.round((totalRecipes - totalExpenses) * 100) / 100;
+    // Banque estimée = report ouverture + recettes exercice - dépenses exercice
+    const bank = Math.round((reportAmount + totalRecipes - totalExpenses) * 100) / 100;
+    const reportRounded = Math.round(reportAmount * 100) / 100;
+
     res.json({
       year,
       total_recipes: Math.round(totalRecipes * 100) / 100,
       total_expenses: Math.round(totalExpenses * 100) / 100,
-      result: Math.round((totalRecipes - totalExpenses) * 100) / 100,
+      result,
+      report_a_nouveau: reportRounded,
+      bilan: {
+        actif: {
+          compte_courant: bank,
+          livret_a: 0,
+          total: bank,
+        },
+        passif: {
+          report_a_nouveau: reportRounded,
+          resultat_exercice: result,
+          total: Math.round((reportRounded + result) * 100) / 100,
+        },
+        // Actif = Passif si tout est en banque (compta de trésorerie)
+        equilibre: Math.abs(bank - (reportRounded + result)) < 0.02,
+      },
       by_ag_label: byAg,
       by_account: byAccount,
       count: entries.length,
+      suspicious_labels: suspicious,
     });
   } catch (err) {
     console.error(err);
