@@ -1,0 +1,314 @@
+const { Op } = require('sequelize');
+const { AccountingEntry, User } = require('../models');
+
+function num(v) {
+  if (v === null || v === undefined || v === '') return 0;
+  const n = Number(String(v).replace(',', '.').replace(/\s/g, ''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function detectType(row) {
+  const t = String(row.entry_type || row.Type || row.type || '').toUpperCase();
+  if (t.includes('REPORT')) return 'REPORT';
+  if (t.includes('RECETTE')) return 'RECETTE';
+  if (t.includes('DEPENSE') || t.includes('DÉPENSE')) return 'DEPENSE';
+  const recipes = num(row.recipes ?? row.Recettes ?? row.recettes);
+  const expenses = num(row.expenses ?? row.Dépenses ?? row.Depenses ?? row.depenses);
+  if (recipes > 0 && expenses <= 0) return 'RECETTE';
+  if (expenses > 0 && recipes <= 0) return 'DEPENSE';
+  if (String(row.account_number || row['N° compte'] || '').startsWith('11')) return 'REPORT';
+  return expenses >= recipes ? 'DEPENSE' : 'RECETTE';
+}
+
+function parseDate(v) {
+  if (!v) return null;
+  const s = String(v).trim();
+  // YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  // DD/MM/YYYY
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  return null;
+}
+
+/** Parse CSV simple (séparateur ; ou ,) */
+function parseCsv(text) {
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter((l) => l.trim());
+  if (lines.length < 2) return [];
+  const sep = lines[0].includes(';') ? ';' : ',';
+  const headers = lines[0].split(sep).map((h) => h.trim().replace(/^"|"$/g, ''));
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = [];
+    let cur = '';
+    let inQ = false;
+    const line = lines[i];
+    for (let c = 0; c < line.length; c++) {
+      const ch = line[c];
+      if (ch === '"') {
+        inQ = !inQ;
+      } else if (ch === sep && !inQ) {
+        cols.push(cur.trim());
+        cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    cols.push(cur.trim());
+    const obj = {};
+    headers.forEach((h, idx) => {
+      obj[h] = (cols[idx] || '').replace(/^"|"$/g, '');
+    });
+    rows.push(obj);
+  }
+  return rows;
+}
+
+function mapRow(raw, defaultYear) {
+  const recipes = num(raw.Recettes ?? raw.recettes ?? raw.recipes ?? raw['Banque Recettes']);
+  const expenses = num(raw.Dépenses ?? raw.Depenses ?? raw.depenses ?? raw.expenses ?? raw['Banque Dépenses']);
+  let amount = num(raw.Montant ?? raw.montant ?? raw.amount);
+  if (!amount) amount = Math.max(recipes, expenses);
+  const entry_date =
+    parseDate(raw.Date ?? raw.date ?? raw.entry_date) ||
+    (defaultYear ? `${defaultYear}-01-01` : null);
+  const label =
+    raw.Libellé ||
+    raw.Libelle ||
+    raw.libelle ||
+    raw.label ||
+    raw['Libellé pour AG'] ||
+    'Écriture';
+  if (!entry_date || !label) return null;
+  // ignorer lignes vides
+  if (amount === 0 && recipes === 0 && expenses === 0) {
+    const lab = String(label).trim();
+    if (!lab || lab === 'Écriture') return null;
+  }
+  const entry_type = detectType({
+    ...raw,
+    recipes,
+    expenses,
+    account_number: raw['N° compte'] || raw.account_number || raw.Compte,
+  });
+  const year = defaultYear || Number(String(entry_date).slice(0, 4));
+  return {
+    year,
+    entry_date,
+    label: String(label).slice(0, 500),
+    ag_label: (raw['Libellé pour AG'] || raw.ag_label || raw['Libelle pour AG'] || null)?.slice?.(0, 120) || null,
+    account_number: String(raw['N° compte'] || raw.account_number || raw.Compte || '').slice(0, 20) || null,
+    account_title: String(raw.Intitulé || raw.Intitule || raw.account_title || raw['Intitulé complet'] || '').slice(0, 255) || null,
+    amount,
+    recipes: entry_type === 'RECETTE' ? recipes || amount : recipes,
+    expenses: entry_type === 'DEPENSE' ? expenses || amount : expenses,
+    entry_type,
+    journal_number: String(raw['N°'] || raw.N || raw.journal_number || '').slice(0, 20) || null,
+  };
+}
+
+async function listEntries(req, res) {
+  try {
+    const where = {};
+    if (req.query.year) where.year = Number(req.query.year);
+    if (req.query.type) where.entry_type = req.query.type;
+    const entries = await AccountingEntry.findAll({
+      where,
+      order: [
+        ['entry_date', 'ASC'],
+        ['journal_number', 'ASC'],
+        ['createdAt', 'ASC'],
+      ],
+    });
+    res.json({ entries });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function summary(req, res) {
+  try {
+    const year = Number(req.query.year) || new Date().getFullYear();
+    const entries = await AccountingEntry.findAll({ where: { year } });
+    let totalRecipes = 0;
+    let totalExpenses = 0;
+    const byAg = {};
+    const byAccount = {};
+    for (const e of entries) {
+      if (e.entry_type === 'REPORT') continue;
+      const r = Number(e.recipes) || 0;
+      const x = Number(e.expenses) || 0;
+      totalRecipes += r;
+      totalExpenses += x;
+      const ag = e.ag_label || e.label || 'Divers';
+      if (!byAg[ag]) byAg[ag] = { recipes: 0, expenses: 0 };
+      byAg[ag].recipes += r;
+      byAg[ag].expenses += x;
+      const acc = e.account_number || '—';
+      if (!byAccount[acc]) byAccount[acc] = { title: e.account_title, recipes: 0, expenses: 0 };
+      byAccount[acc].recipes += r;
+      byAccount[acc].expenses += x;
+    }
+    res.json({
+      year,
+      total_recipes: Math.round(totalRecipes * 100) / 100,
+      total_expenses: Math.round(totalExpenses * 100) / 100,
+      result: Math.round((totalRecipes - totalExpenses) * 100) / 100,
+      by_ag_label: byAg,
+      by_account: byAccount,
+      count: entries.length,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function years(req, res) {
+  try {
+    const rows = await AccountingEntry.findAll({
+      attributes: ['year'],
+      group: ['year'],
+      order: [['year', 'DESC']],
+    });
+    const list = rows.map((r) => r.year);
+    res.json({ years: list.length ? list : [new Date().getFullYear()] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function createEntry(req, res) {
+  try {
+    const body = req.body || {};
+    const entry_date = parseDate(body.entry_date);
+    if (!entry_date || !body.label) {
+      return res.status(400).json({ error: 'Date et libellé requis' });
+    }
+    const recipes = num(body.recipes);
+    const expenses = num(body.expenses);
+    let amount = num(body.amount);
+    if (!amount) amount = Math.max(recipes, expenses);
+    let entry_type = body.entry_type || detectType({ recipes, expenses, entry_type: body.entry_type });
+    const year = Number(body.year) || Number(entry_date.slice(0, 4));
+    const entry = await AccountingEntry.create({
+      year,
+      entry_date,
+      label: String(body.label).slice(0, 500),
+      ag_label: body.ag_label || null,
+      account_number: body.account_number || null,
+      account_title: body.account_title || null,
+      amount,
+      recipes: entry_type === 'RECETTE' ? recipes || amount : recipes,
+      expenses: entry_type === 'DEPENSE' ? expenses || amount : expenses,
+      entry_type,
+      journal_number: body.journal_number || null,
+      notes: body.notes || null,
+      created_by: req.user.id,
+    });
+    res.status(201).json({ entry });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function updateEntry(req, res) {
+  try {
+    const entry = await AccountingEntry.findByPk(req.params.id);
+    if (!entry) return res.status(404).json({ error: 'Écriture introuvable' });
+    const body = req.body || {};
+    const fields = {};
+    if (body.entry_date) fields.entry_date = parseDate(body.entry_date);
+    if (body.label != null) fields.label = String(body.label).slice(0, 500);
+    if (body.ag_label != null) fields.ag_label = body.ag_label;
+    if (body.account_number != null) fields.account_number = body.account_number;
+    if (body.account_title != null) fields.account_title = body.account_title;
+    if (body.amount != null) fields.amount = num(body.amount);
+    if (body.recipes != null) fields.recipes = num(body.recipes);
+    if (body.expenses != null) fields.expenses = num(body.expenses);
+    if (body.entry_type) fields.entry_type = body.entry_type;
+    if (body.year != null) fields.year = Number(body.year);
+    if (body.notes != null) fields.notes = body.notes;
+    await entry.update(fields);
+    res.json({ entry });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function deleteEntry(req, res) {
+  try {
+    const entry = await AccountingEntry.findByPk(req.params.id);
+    if (!entry) return res.status(404).json({ error: 'Écriture introuvable' });
+    await entry.destroy();
+    res.json({ message: 'Écriture supprimée' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function deleteYear(req, res) {
+  try {
+    const year = Number(req.params.year);
+    if (!year) return res.status(400).json({ error: 'Année invalide' });
+    const n = await AccountingEntry.destroy({ where: { year } });
+    res.json({ message: `${n} écriture(s) supprimée(s) pour ${year}` });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+/**
+ * POST body: { year, csv } ou { year, rows: [...] }
+ */
+async function importEntries(req, res) {
+  try {
+    const year = Number(req.body.year);
+    if (!year) return res.status(400).json({ error: 'year requis' });
+    let mapped = [];
+    if (req.body.csv && typeof req.body.csv === 'string') {
+      const rawRows = parseCsv(req.body.csv);
+      mapped = rawRows.map((r) => mapRow(r, year)).filter(Boolean);
+    } else if (Array.isArray(req.body.rows)) {
+      mapped = req.body.rows.map((r) => mapRow(r, year)).filter(Boolean);
+    } else {
+      return res.status(400).json({ error: 'csv ou rows requis' });
+    }
+    if (!mapped.length) {
+      return res.status(400).json({ error: 'Aucune ligne valide trouvée' });
+    }
+    const replace = req.body.replace === true || req.body.replace === '1';
+    if (replace) {
+      await AccountingEntry.destroy({ where: { year } });
+    }
+    const created = await AccountingEntry.bulkCreate(
+      mapped.map((m) => ({ ...m, created_by: req.user.id }))
+    );
+    res.status(201).json({
+      message: `${created.length} écriture(s) importée(s) pour ${year}`,
+      count: created.length,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+module.exports = {
+  listEntries,
+  summary,
+  years,
+  createEntry,
+  updateEntry,
+  deleteEntry,
+  deleteYear,
+  importEntries,
+};
