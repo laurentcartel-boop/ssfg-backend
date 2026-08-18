@@ -1,4 +1,4 @@
-const {
+    const {
   Round,
   RoundPlayer,
   HoleScore,
@@ -818,8 +818,73 @@ async function listExploitsAlbum(req, res) {
   }
 }
 
+
+async function updateExploit(req, res) {
+  try {
+    const e = await RoundExploit.findByPk(req.params.exploitId);
+    if (!e || e.round_id !== req.params.id) {
+      return res.status(404).json({ error: 'Exploit introuvable' });
+    }
+    const round = await Round.findByPk(req.params.id, {
+      include: [{ model: RoundPlayer, as: 'players' }],
+    });
+    if (!round) return res.status(404).json({ error: 'Partie non trouvée' });
+    const isAdmin = ['admin', 'super_admin'].includes(req.user.role);
+    const isPlayer =
+      round && (round.players || []).some((p) => p.user_id === req.user.id);
+    if (!isAdmin && !isPlayer && e.created_by !== req.user.id && e.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Non autorisé' });
+    }
+    const fields = {};
+    if (req.body.comment !== undefined) {
+      fields.comment = req.body.comment ? String(req.body.comment).slice(0, 280) : null;
+    }
+    if (req.body.image_url !== undefined) {
+      fields.image_url = req.body.image_url || null;
+    }
+    if (req.body.exploit_type) {
+      const allowed = ['hole_in_one', 'albatross', 'eagle'];
+      const t = String(req.body.exploit_type).toLowerCase();
+      if (!allowed.includes(t)) {
+        return res.status(400).json({ error: 'Type invalide' });
+      }
+      fields.exploit_type = t;
+    }
+    if (req.body.hole_number != null) {
+      const h = parseInt(req.body.hole_number, 10);
+      if (!h || h < 1 || h > 18) {
+        return res.status(400).json({ error: 'Trou invalide' });
+      }
+      fields.hole_number = h;
+    }
+    if (req.body.user_id && isAdmin) {
+      fields.user_id = req.body.user_id;
+    }
+    await e.update(fields);
+    const user = await User.findByPk(e.user_id, {
+      attributes: ['id', 'first_name', 'last_name'],
+    });
+    res.json({
+      exploit: {
+        id: e.id,
+        hole_number: e.hole_number,
+        exploit_type: e.exploit_type,
+        comment: e.comment,
+        image_url: e.image_url,
+        created_at: e.createdAt,
+        user,
+        round: { id: round.id, name: round.name, date: round.date },
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
 module.exports = {
   listExploitsAlbum,
+  updateExploit,
   listRounds,
   getRound,
   createRound,
