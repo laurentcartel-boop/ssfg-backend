@@ -402,7 +402,62 @@ async function importEntries(req, res) {
   }
 }
 
+
+/** Comptes déjà utilisés (tous exercices) + libellé d’exemple */
+async function listAccounts(req, res) {
+  try {
+    const entries = await AccountingEntry.findAll({
+      attributes: ['account_number', 'label', 'ag_label'],
+      where: {
+        account_number: { [require('sequelize').Op.ne]: null },
+      },
+      order: [['account_number', 'ASC']],
+      limit: 5000,
+    });
+    const map = new Map();
+    for (const e of entries) {
+      const num = String(e.account_number || '').trim();
+      if (!num || num === '—' || num === '#VALEUR!') continue;
+      if (!map.has(num)) {
+        map.set(num, {
+          account_number: num,
+          label: e.ag_label || e.label || '',
+        });
+      }
+    }
+    // Comptes types asso souvent utiles si absents
+    const defaults = [
+      { account_number: '512', label: 'Banque' },
+      { account_number: '53', label: 'Caisse' },
+      { account_number: '756', label: 'Cotisations' },
+      { account_number: '740', label: 'Subventions' },
+      { account_number: '77', label: 'Produits divers' },
+      { account_number: '606', label: 'Achats non stockés' },
+      { account_number: '6063', label: 'Fournitures / équipement' },
+      { account_number: '6278', label: 'Frais bancaires' },
+      { account_number: '616', label: 'Assurances' },
+      { account_number: '622', label: 'Honoraires' },
+      { account_number: '628', label: 'Divers (OVH, AFFG…)' },
+      { account_number: '862', label: 'Encadrement / prestations' },
+      { account_number: '11', label: 'Report à nouveau' },
+    ];
+    for (const d of defaults) {
+      if (!map.has(d.account_number)) map.set(d.account_number, d);
+    }
+    const accounts = Array.from(map.values()).sort((a, b) =>
+      String(a.account_number).localeCompare(String(b.account_number), 'fr', {
+        numeric: true,
+      })
+    );
+    res.json({ accounts });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
 module.exports = {
+  listAccounts,
   listEntries,
   summary,
   years,
