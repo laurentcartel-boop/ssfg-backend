@@ -7,6 +7,7 @@ const { Round, RoundPlayer } = require('../models');
 router.use(authenticate);
 
 router.get('/', roundController.listRounds);
+router.get('/exploits/album', roundController.listExploitsAlbum);
 router.get('/:id/comments', roundController.listComments);
 router.get('/:id/exploits', roundController.listExploits);
 router.post('/:id/exploits', roundController.addExploit);
