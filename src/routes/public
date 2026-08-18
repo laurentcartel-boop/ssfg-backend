@@ -165,6 +165,63 @@ router.get('/rounds/:id/comments', async (req, res) => {
   }
 });
 
+router.get('/exploits/album', async (req, res) => {
+  try {
+    const { RoundExploit, Round, User } = require('../models');
+    const { Op } = require('sequelize');
+    const year = req.query.year ? parseInt(req.query.year, 10) : null;
+    const includeRound = {
+      model: Round,
+      as: 'round',
+      attributes: ['id', 'name', 'date', 'status'],
+      required: true,
+    };
+    if (year) {
+      includeRound.where = {
+        date: { [Op.gte]: `${year}-01-01`, [Op.lte]: `${year}-12-31` },
+      };
+    }
+    const exploits = await RoundExploit.findAll({
+      include: [
+        includeRound,
+        { model: User, as: 'user', attributes: ['id', 'first_name', 'last_name'] },
+      ],
+      order: [
+        [{ model: Round, as: 'round' }, 'date', 'DESC'],
+        ['hole_number', 'ASC'],
+      ],
+      limit: 500,
+    });
+    const all = await RoundExploit.findAll({
+      include: [{ model: Round, as: 'round', attributes: ['date'], required: true }],
+      attributes: ['id'],
+    });
+    const yearsSet = new Set();
+    for (const e of all) {
+      if (e.round?.date) yearsSet.add(String(e.round.date).slice(0, 4));
+    }
+    res.json({
+      year: year || null,
+      years: Array.from(yearsSet).sort().reverse(),
+      exploits: exploits.map((e) => ({
+        id: e.id,
+        hole_number: e.hole_number,
+        exploit_type: e.exploit_type,
+        comment: e.comment,
+        image_url: e.image_url,
+        created_at: e.createdAt,
+        user: e.user,
+        round: e.round
+          ? { id: e.round.id, name: e.round.name, date: e.round.date }
+          : null,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 router.get('/rounds/:id/exploits', async (req, res) => {
   try {
     const { RoundExploit, User } = require('../models');
