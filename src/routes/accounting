@@ -6,6 +6,7 @@ const { authenticate, requireRole } = require('../middleware/auth');
 router.use(authenticate);
 router.use(requireRole('super_admin'));
 
+router.get('/accounts', ctrl.listAccounts);
 router.get('/years', ctrl.years);
 router.get('/summary', ctrl.summary);
 router.get('/', ctrl.listEntries);
