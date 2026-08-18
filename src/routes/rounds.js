@@ -11,6 +11,7 @@ router.get('/exploits/album', roundController.listExploitsAlbum);
 router.get('/:id/comments', roundController.listComments);
 router.get('/:id/exploits', roundController.listExploits);
 router.post('/:id/exploits', roundController.addExploit);
+router.put('/:id/exploits/:exploitId', roundController.updateExploit);
 router.delete('/:id/exploits/:exploitId', roundController.deleteExploit);
 router.post('/:id/comments', roundController.addComment);
 router.delete('/:id/comments/:commentId', roundController.deleteComment);
