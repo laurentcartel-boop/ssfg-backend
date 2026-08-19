@@ -308,6 +308,7 @@ async function createEntry(req, res) {
       entry_type,
       journal_number: body.journal_number || null,
       notes: body.notes || null,
+      attachment_url: body.attachment_url || null,
       created_by: req.user.id,
     });
     res.status(201).json({ entry });
@@ -334,6 +335,7 @@ async function updateEntry(req, res) {
     if (body.entry_type) fields.entry_type = body.entry_type;
     if (body.year != null) fields.year = Number(body.year);
     if (body.notes != null) fields.notes = body.notes;
+    if (body.attachment_url !== undefined) fields.attachment_url = body.attachment_url || null;
     await entry.update(fields);
     res.json({ entry });
   } catch (err) {
