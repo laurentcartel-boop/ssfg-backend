@@ -1,0 +1,223 @@
+const { Op } = require('sequelize');
+const { Invoice } = require('../models');
+
+const CLUB = {
+  name: 'Saint-Saëns FootGolf — SSFG',
+  address: '35 Rue Simone Veilles',
+  zip: '76680',
+  city: 'Saint-Saëns',
+  country: 'France',
+  full_address: 'SSFG — 35 Rue Simone Veilles, 76680 Saint-Saëns',
+  legal: 'Association loi 1901 — TVA non applicable, art. 293 B du CGI',
+};
+
+function calcTotal(lines) {
+  if (!Array.isArray(lines)) return 0;
+  return lines.reduce((s, l) => {
+    const q = Number(l.quantity) || 0;
+    const p = Number(l.unit_price) || 0;
+    return s + q * p;
+  }, 0);
+}
+
+function serialize(inv) {
+  return {
+    id: inv.id,
+    doc_type: inv.doc_type,
+    number: inv.number,
+    year: inv.year,
+    issue_date: inv.issue_date,
+    client_name: inv.client_name,
+    client_address: inv.client_address,
+    client_email: inv.client_email,
+    client_phone: inv.client_phone,
+    service_type: inv.service_type,
+    description: inv.description,
+    lines: inv.lines || [],
+    total_amount: Number(inv.total_amount) || 0,
+    notes: inv.notes,
+    status: inv.status,
+    created_at: inv.createdAt,
+    club: CLUB,
+  };
+}
+
+async function nextNumber(year, doc_type) {
+  const prefix = `${year}-`;
+  const last = await Invoice.findOne({
+    where: {
+      year,
+      number: { [Op.like]: `${prefix}%` },
+    },
+    order: [['number', 'DESC']],
+  });
+  let seq = 1;
+  if (last?.number) {
+    const part = String(last.number).split('-')[1];
+    const n = parseInt(part, 10);
+    if (!Number.isNaN(n)) seq = n + 1;
+  }
+  // Format 2026-0001
+  return `${year}-${String(seq).padStart(4, '0')}`;
+}
+
+async function listInvoices(req, res) {
+  try {
+    const where = {};
+    if (req.query.year) where.year = parseInt(req.query.year, 10);
+    if (req.query.doc_type) where.doc_type = String(req.query.doc_type).toUpperCase();
+    const list = await Invoice.findAll({
+      where,
+      order: [['issue_date', 'DESC'], ['number', 'DESC']],
+      limit: 200,
+    });
+    res.json({ invoices: list.map(serialize), club: CLUB });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function getInvoice(req, res) {
+  try {
+    const inv = await Invoice.findByPk(req.params.id);
+    if (!inv) return res.status(404).json({ error: 'Document introuvable' });
+    res.json({ invoice: serialize(inv), club: CLUB });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function createInvoice(req, res) {
+  try {
+    const body = req.body || {};
+    const doc_type = String(body.doc_type || 'FACTURE').toUpperCase();
+    if (!['DEVIS', 'FACTURE'].includes(doc_type)) {
+      return res.status(400).json({ error: 'Type DEVIS ou FACTURE' });
+    }
+    const client_name = String(body.client_name || '').trim();
+    if (!client_name) return res.status(400).json({ error: 'Nom client obligatoire' });
+
+    const issue_date = body.issue_date || new Date().toISOString().slice(0, 10);
+    const year = parseInt(String(issue_date).slice(0, 4), 10) || new Date().getFullYear();
+    const number = await nextNumber(year, doc_type);
+
+    const lines = Array.isArray(body.lines) ? body.lines : [];
+    const total_amount = Math.round(calcTotal(lines) * 100) / 100;
+
+    const inv = await Invoice.create({
+      doc_type,
+      number,
+      year,
+      issue_date,
+      client_name,
+      client_address: body.client_address || null,
+      client_email: body.client_email || null,
+      client_phone: body.client_phone || null,
+      service_type: body.service_type || null,
+      description: body.description || null,
+      lines,
+      total_amount,
+      notes: body.notes || null,
+      status: body.status || 'draft',
+      created_by: req.user?.id || null,
+    });
+
+    res.status(201).json({ invoice: serialize(inv), club: CLUB });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function updateInvoice(req, res) {
+  try {
+    const inv = await Invoice.findByPk(req.params.id);
+    if (!inv) return res.status(404).json({ error: 'Document introuvable' });
+    const body = req.body || {};
+    const fields = {};
+    for (const k of [
+      'client_name',
+      'client_address',
+      'client_email',
+      'client_phone',
+      'service_type',
+      'description',
+      'notes',
+      'status',
+      'issue_date',
+    ]) {
+      if (body[k] !== undefined) fields[k] = body[k];
+    }
+    if (body.doc_type && ['DEVIS', 'FACTURE'].includes(String(body.doc_type).toUpperCase())) {
+      fields.doc_type = String(body.doc_type).toUpperCase();
+    }
+    if (Array.isArray(body.lines)) {
+      fields.lines = body.lines;
+      fields.total_amount = Math.round(calcTotal(body.lines) * 100) / 100;
+    }
+    await inv.update(fields);
+    res.json({ invoice: serialize(inv), club: CLUB });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function deleteInvoice(req, res) {
+  try {
+    const inv = await Invoice.findByPk(req.params.id);
+    if (!inv) return res.status(404).json({ error: 'Document introuvable' });
+    await inv.destroy();
+    res.json({ message: 'Document supprimé' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function convertToInvoice(req, res) {
+  try {
+    const devis = await Invoice.findByPk(req.params.id);
+    if (!devis) return res.status(404).json({ error: 'Devis introuvable' });
+    if (devis.doc_type !== 'DEVIS') {
+      return res.status(400).json({ error: 'Seul un devis peut être converti' });
+    }
+    const issue_date = new Date().toISOString().slice(0, 10);
+    const year = parseInt(issue_date.slice(0, 4), 10);
+    const number = await nextNumber(year, 'FACTURE');
+    const inv = await Invoice.create({
+      doc_type: 'FACTURE',
+      number,
+      year,
+      issue_date,
+      client_name: devis.client_name,
+      client_address: devis.client_address,
+      client_email: devis.client_email,
+      client_phone: devis.client_phone,
+      service_type: devis.service_type,
+      description: devis.description,
+      lines: devis.lines,
+      total_amount: devis.total_amount,
+      notes: devis.notes,
+      status: 'draft',
+      created_by: req.user?.id || null,
+    });
+    await devis.update({ status: 'accepted' });
+    res.status(201).json({ invoice: serialize(inv), club: CLUB });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+module.exports = {
+  listInvoices,
+  getInvoice,
+  createInvoice,
+  updateInvoice,
+  deleteInvoice,
+  convertToInvoice,
+  CLUB,
+};
