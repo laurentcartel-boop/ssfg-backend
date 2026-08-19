@@ -65,6 +65,11 @@ const AccountingEntry = sequelize.define(
       type: DataTypes.STRING(500),
       allowNull: true,
     },
+    /** Scan facture d'achat (data URL JPEG compressé) */
+    attachment_url: {
+      type: DataTypes.TEXT('long'),
+      allowNull: true,
+    },
     created_by: {
       type: DataTypes.UUID,
       allowNull: true,
