@@ -1,0 +1,87 @@
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
+
+const Invoice = sequelize.define(
+  'Invoice',
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    doc_type: {
+      // DEVIS | FACTURE
+      type: DataTypes.STRING(20),
+      allowNull: false,
+      defaultValue: 'FACTURE',
+    },
+    number: {
+      type: DataTypes.STRING(20),
+      allowNull: false,
+      unique: true,
+    },
+    year: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
+    issue_date: {
+      type: DataTypes.DATEONLY,
+      allowNull: false,
+    },
+    client_name: {
+      type: DataTypes.STRING(200),
+      allowNull: false,
+    },
+    client_address: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    client_email: {
+      type: DataTypes.STRING(120),
+      allowNull: true,
+    },
+    client_phone: {
+      type: DataTypes.STRING(40),
+      allowNull: true,
+    },
+    service_type: {
+      type: DataTypes.STRING(200),
+      allowNull: true,
+    },
+    description: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    // [{ label, quantity, unit_price }]
+    lines: {
+      type: DataTypes.JSON,
+      allowNull: false,
+      defaultValue: [],
+    },
+    total_amount: {
+      type: DataTypes.DECIMAL(12, 2),
+      allowNull: false,
+      defaultValue: 0,
+    },
+    notes: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    status: {
+      // draft | sent | paid | cancelled | accepted
+      type: DataTypes.STRING(20),
+      allowNull: false,
+      defaultValue: 'draft',
+    },
+    created_by: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+  },
+  {
+    tableName: 'invoices',
+    indexes: [{ fields: ['year'] }, { fields: ['doc_type'] }, { fields: ['number'], unique: true }],
+  }
+);
+
+module.exports = Invoice;
