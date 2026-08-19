@@ -10,6 +10,7 @@ const Article = require('./Article');
 const MatchPlayChampionship = require('./MatchPlayChampionship');
 const MatchPlayMatch = require('./MatchPlayMatch');
 const AccountingEntry = require('./AccountingEntry');
+const Invoice = require('./Invoice');
 const RoundComment = require('./RoundComment');
 const RoundExploit = require('./RoundExploit');
 
@@ -61,6 +62,8 @@ MatchPlayMatch.belongsTo(User, { foreignKey: 'player_b_id', as: 'playerB', const
 MatchPlayMatch.belongsTo(User, { foreignKey: 'winner_id', as: 'winner', constraints: false });
 MatchPlayMatch.belongsTo(User, { foreignKey: 'created_by', as: 'creator', constraints: false });
 AccountingEntry.belongsTo(User, { foreignKey: 'created_by', as: 'creator', constraints: false });
+Invoice.belongsTo(User, { foreignKey: 'created_by', as: 'creator', constraints: false });
+
 
 Round.hasMany(RoundComment, { foreignKey: 'round_id', as: 'comments', constraints: false });
 RoundComment.belongsTo(Round, { foreignKey: 'round_id', as: 'round', constraints: false });
@@ -85,6 +88,7 @@ module.exports = {
   MatchPlayChampionship,
   MatchPlayMatch,
   AccountingEntry,
+  Invoice,
   RoundComment,
   RoundExploit,
 };
