@@ -113,7 +113,15 @@ async function start() {
     }
 
     try {
-      await sequelize.sync();
+      
+    try {
+      await sequelize.query(
+        'ALTER TABLE accounting_entries ADD COLUMN attachment_url LONGTEXT NULL'
+      );
+      console.log('➕ accounting_entries.attachment_url');
+    } catch (e) {}
+
+    await sequelize.sync();
       console.log('✅ sequelize.sync OK');
     } catch (syncErr) {
       console.error('❌ sequelize.sync:', syncErr);
