@@ -27,6 +27,7 @@ app.use('/api/rounds', require('./routes/rounds'));
 app.use('/api/rankings', require('./routes/rankings'));
 app.use('/api/competitions', require('./routes/competitions'));
 app.use('/api/articles', require('./routes/articles'));
+app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/accounting', require('./routes/accounting'));
 app.use('/api/matchplay', require('./routes/matchplay'));
 
