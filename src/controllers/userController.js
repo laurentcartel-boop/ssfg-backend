@@ -1,4 +1,4 @@
-const { User, IndexHistory } = require('../models');
+const { User, IndexHistory, Club } = require('../models');
 const { getIndexSeries, getCategories } = require('../services/indexService');
 const { Op } = require('sequelize');
 
@@ -26,11 +26,33 @@ async function listUsers(req, res) {
 
     const users = await User.findAll({
       where,
+      include: [
+        {
+          model: Club,
+          as: 'club',
+          attributes: ['id', 'code', 'name', 'short_name'],
+          required: false,
+        },
+      ],
       order: [['last_name', 'ASC'], ['first_name', 'ASC']],
       attributes: { exclude: ['password_hash'] },
     });
 
-    res.json({ users });
+    res.json({
+      users: users.map((u) => {
+        const j = u.toJSON();
+        delete j.password_hash;
+        j.club = u.club
+          ? {
+              id: u.club.id,
+              code: u.club.code,
+              name: u.club.name,
+              short_name: u.club.short_name,
+            }
+          : null;
+        return j;
+      }),
+    });
   } catch (err) {
     console.error('listUsers error:', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -127,10 +149,14 @@ async function updateUser(req, res) {
 
 async function listClubs(req, res) {
   try {
-    const clubs = await Club.findAll({
-      where: { is_active: true },
+    if (!Club) {
+      return res.status(500).json({ error: 'Modèle Club absent' });
+    }
+    let clubs = await Club.findAll({
       order: [['sort_order', 'ASC'], ['name', 'ASC']],
     });
+    // Filtre is_active si le champ existe
+    clubs = clubs.filter((c) => c.is_active !== false);
     res.json({
       clubs: clubs.map((c) => ({
         id: c.id,
@@ -140,8 +166,8 @@ async function listClubs(req, res) {
       })),
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Erreur serveur' });
+    console.error('listClubs error:', err);
+    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
   }
 }
 
