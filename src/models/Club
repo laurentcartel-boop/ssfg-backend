@@ -1,0 +1,40 @@
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
+
+const Club = sequelize.define(
+  'Club',
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    code: {
+      type: DataTypes.STRING(20),
+      allowNull: false,
+      unique: true,
+    },
+    name: {
+      type: DataTypes.STRING(120),
+      allowNull: false,
+    },
+    short_name: {
+      type: DataTypes.STRING(40),
+      allowNull: true,
+    },
+    is_active: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true,
+    },
+    sort_order: {
+      type: DataTypes.INTEGER,
+      defaultValue: 100,
+    },
+  },
+  {
+    tableName: 'clubs',
+    indexes: [{ fields: ['code'], unique: true }],
+  }
+);
+
+module.exports = Club;
