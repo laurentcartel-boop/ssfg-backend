@@ -9,10 +9,11 @@ const { Op } = require('sequelize');
  */
 async function listUsers(req, res) {
   try {
-    const { search, role, active } = req.query;
+    const { search, role, active, club_id } = req.query;
     const where = {};
 
     if (role) where.role = role;
+    if (club_id) where.club_id = club_id;
     if (active !== undefined) where.is_active = active === 'true';
 
     if (search) {
@@ -98,6 +99,7 @@ async function updateUser(req, res) {
     // Champs réservés au super-admin
     if (isSuperAdmin) {
       if (body.role) allowed.role = body.role;
+    if (body.club_id !== undefined) allowed.club_id = body.club_id || null;
       if (body.is_active !== undefined) allowed.is_active = body.is_active;
       if (body.is_rookie !== undefined) allowed.is_rookie = body.is_rookie;
       if (body.index_value !== undefined) allowed.index_value = body.index_value;
@@ -123,7 +125,28 @@ async function updateUser(req, res) {
   }
 }
 
+async function listClubs(req, res) {
+  try {
+    const clubs = await Club.findAll({
+      where: { is_active: true },
+      order: [['sort_order', 'ASC'], ['name', 'ASC']],
+    });
+    res.json({
+      clubs: clubs.map((c) => ({
+        id: c.id,
+        code: c.code,
+        name: c.name,
+        short_name: c.short_name,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
 module.exports = {
+  listClubs,
   listUsers,
   getUser,
   updateUser,
