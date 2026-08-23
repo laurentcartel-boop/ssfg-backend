@@ -1,5 +1,6 @@
 const sequelize = require('../config/database');
 const User = require('./User');
+const Club = require('./Club');
 const Course = require('./Course');
 const Round = require('./Round');
 const RoundPlayer = require('./RoundPlayer');
@@ -75,9 +76,13 @@ RoundExploit.belongsTo(User, { foreignKey: 'created_by', as: 'creator', constrai
 
 
 
+Club.hasMany(User, { foreignKey: 'club_id', as: 'players', constraints: false });
+User.belongsTo(Club, { foreignKey: 'club_id', as: 'club', constraints: false });
+
 module.exports = {
   sequelize,
   User,
+  Club,
   Course,
   Round,
   RoundPlayer,
