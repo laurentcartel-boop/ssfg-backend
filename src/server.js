@@ -103,11 +103,17 @@ async function seedClubs() {
     { code: 'NONE', name: 'Sans club', short_name: 'Sans club', sort_order: 99 },
   ];
   for (const d of defaults) {
-    await Club.findOrCreate({
-      where: { code: d.code },
-      defaults: d,
-    });
+    try {
+      await Club.findOrCreate({
+        where: { code: d.code },
+        defaults: { ...d, is_active: true },
+      });
+    } catch (e) {
+      console.warn('seed club', d.code, e.message);
+    }
   }
+  const count = await Club.count();
+  console.log(`✅ Clubs en base: ${count}`);
   const ssfg = await Club.findOne({ where: { code: 'SSFG' } });
   if (ssfg) {
     const [n] = await User.update(
