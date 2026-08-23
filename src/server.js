@@ -12,7 +12,7 @@ const allowedOrigins = process.env.CORS_ORIGINS
   : true; // true = toutes origines (dev)
 
 app.use(cors({ origin: allowedOrigins, credentials: true }));
-app.use(express.json({ limit: '12mb' }));
+app.use(express.json({ limit: '15mb' }));
 
 // Routes
 app.get('/api/health', (req, res) => {
