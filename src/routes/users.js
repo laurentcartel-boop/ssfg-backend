@@ -7,6 +7,7 @@ const { authenticate, requireRole } = require('../middleware/auth');
 router.use(authenticate);
 
 // Liste des joueurs (admin + super_admin pour gérer les parties)
+router.get('/clubs/list', userController.listClubs);
 router.get('/', requireRole('admin', 'super_admin'), userController.listUsers);
 
 // Profil d'un utilisateur
