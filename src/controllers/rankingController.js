@@ -1,4 +1,4 @@
-const { User } = require('../models');
+const { User, Club } = require('../models');
 const { getIndexSeries, getCategories } = require('../services/indexService');
 const { Op } = require('sequelize');
 
@@ -9,11 +9,12 @@ const { Op } = require('sequelize');
  */
 async function getIndexRanking(req, res) {
   try {
-    const { series } = req.query;
+    const { series, club } = req.query;
 
     const users = await User.findAll({
       where: { is_active: true, role: { [Op.in]: ['joueur', 'admin', 'super_admin'] } },
-      attributes: ['id', 'first_name', 'last_name', 'index_value', 'gender', 'birth_date', 'is_rookie', 'last_round_date'],
+      attributes: ['id', 'first_name', 'last_name', 'index_value', 'gender', 'birth_date', 'is_rookie', 'last_round_date', 'club_id'],
+      include: [{ model: Club, as: 'club', attributes: ['id', 'code', 'short_name', 'name'], required: false }],
       order: [['index_value', 'ASC']], // plus bas = meilleur
     });
 
@@ -26,7 +27,15 @@ async function getIndexRanking(req, res) {
       series: getIndexSeries(u.index_value),
       categories: getCategories(u),
       last_round_date: u.last_round_date,
+      club: u.club
+        ? { id: u.club.id, code: u.club.code, short_name: u.club.short_name, name: u.club.name }
+        : null,
     }));
+
+    if (club) {
+      const code = String(club).toUpperCase();
+      ranked = ranked.filter((r) => (r.club?.code || '').toUpperCase() === code);
+    }
 
     // Filtrer par série si demandé
     if (series === 'master') {
@@ -70,7 +79,8 @@ async function getCategoryRanking(req, res) {
 
     const users = await User.findAll({
       where: { is_active: true },
-      attributes: ['id', 'first_name', 'last_name', 'index_value', 'gender', 'birth_date', 'is_rookie', 'last_round_date'],
+      attributes: ['id', 'first_name', 'last_name', 'index_value', 'gender', 'birth_date', 'is_rookie', 'last_round_date', 'club_id'],
+      include: [{ model: Club, as: 'club', attributes: ['id', 'code', 'short_name', 'name'], required: false }],
       order: [['index_value', 'ASC']],
     });
 
