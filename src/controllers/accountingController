@@ -405,53 +405,65 @@ async function importEntries(req, res) {
 }
 
 
-/** Comptes déjà utilisés (tous exercices) + libellé d’exemple */
+/**
+ * Libellés type PCG / usage asso (propres, sans année ni détail d’écriture).
+ * Prioritaires sur les libellés historiques importés.
+ */
+const PCGA_CATALOG = {
+  '11': { label: 'Report à nouveau', ag_hint: 'Report à nouveau' },
+  '51': { label: 'Banques (autres)', ag_hint: null },
+  '512': { label: 'Banque', ag_hint: null },
+  '53': { label: 'Caisse', ag_hint: null },
+  '110': { label: 'Report à nouveau / solde', ag_hint: 'Report à nouveau' },
+  '606': { label: 'Achats non stockés de matières et fournitures', ag_hint: 'Achats divers (boulangerie, etc.)' },
+  '6063': { label: 'Fournitures d’entretien et de petit équipement', ag_hint: 'Équipement / tenues' },
+  '616': { label: 'Primes d’assurance', ag_hint: 'Assurance RC pro' },
+  '622': { label: 'Rémunérations d’intermédiaires et honoraires', ag_hint: null },
+  '627': { label: 'Services bancaires et assimilés', ag_hint: 'Frais bancaires' },
+  '6278': { label: 'Autres frais bancaires', ag_hint: 'Frais bancaires' },
+  '628': { label: 'Divers (cotisations, hébergement web…)', ag_hint: 'Hébergement OVH / site' },
+  '706': { label: 'Prestations de services', ag_hint: 'Billetterie HelloAsso (Trophées)' },
+  '708': { label: 'Produits des activités annexes', ag_hint: 'Ventes chalet / alimentation' },
+  '740': { label: 'Subventions d’exploitation', ag_hint: 'Subventions' },
+  '756': { label: 'Cotisations', ag_hint: 'Cotisations joueurs' },
+  '77': { label: 'Produits divers de gestion courante', ag_hint: 'Autres recettes' },
+  '758': { label: 'Produits divers de gestion courante', ag_hint: 'Sponsors / mécénat' },
+  '862': { label: 'Emplois des contributions volontaires', ag_hint: null },
+};
+
 async function listAccounts(req, res) {
   try {
     const entries = await AccountingEntry.findAll({
-      attributes: ['account_number', 'label', 'ag_label'],
+      attributes: ['account_number'],
       where: {
         account_number: { [require('sequelize').Op.ne]: null },
       },
-      order: [['account_number', 'ASC']],
       limit: 5000,
     });
-    const map = new Map();
+    const nums = new Set();
     for (const e of entries) {
       const num = String(e.account_number || '').trim();
       if (!num || num === '—' || num === '#VALEUR!') continue;
-      if (!map.has(num)) {
-        map.set(num, {
+      nums.add(num);
+    }
+    for (const k of Object.keys(PCGA_CATALOG)) nums.add(k);
+
+    const accounts = Array.from(nums)
+      .map((num) => {
+        const cat = PCGA_CATALOG[num];
+        return {
           account_number: num,
-          label: e.ag_label || e.label || '',
-        });
-      }
-    }
-    // Comptes types asso souvent utiles si absents
-    const defaults = [
-      { account_number: '512', label: 'Banque' },
-      { account_number: '53', label: 'Caisse' },
-      { account_number: '756', label: 'Cotisations' },
-      { account_number: '740', label: 'Subventions' },
-      { account_number: '77', label: 'Produits divers' },
-      { account_number: '606', label: 'Achats non stockés' },
-      { account_number: '6063', label: 'Fournitures / équipement' },
-      { account_number: '6278', label: 'Frais bancaires' },
-      { account_number: '616', label: 'Assurances' },
-      { account_number: '622', label: 'Honoraires' },
-      { account_number: '628', label: 'Divers (OVH, AFFG…)' },
-      { account_number: '862', label: 'Encadrement / prestations' },
-      { account_number: '11', label: 'Report à nouveau' },
-    ];
-    for (const d of defaults) {
-      if (!map.has(d.account_number)) map.set(d.account_number, d);
-    }
-    const accounts = Array.from(map.values()).sort((a, b) =>
-      String(a.account_number).localeCompare(String(b.account_number), 'fr', {
-        numeric: true,
+          label: cat ? cat.label : `Compte ${num}`,
+          ag_hint: cat ? cat.ag_hint : null,
+          from_catalog: !!cat,
+        };
       })
-    );
-    res.json({ accounts });
+      .sort((a, b) =>
+        String(a.account_number).localeCompare(String(b.account_number), 'fr', {
+          numeric: true,
+        })
+      );
+    res.json({ accounts, catalog: PCGA_CATALOG });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur serveur' });
