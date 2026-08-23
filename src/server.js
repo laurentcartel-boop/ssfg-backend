@@ -81,6 +81,33 @@ async function migrateMatchPlay() {
   }
 }
 
+
+async function seedClubs() {
+  const { Club, User } = require('./models');
+  const defaults = [
+    { code: 'SSFG', name: 'Saint-Saëns FootGolf', short_name: 'SSFG', sort_order: 1 },
+    { code: 'AFG', name: 'AFG', short_name: 'AFG', sort_order: 2 },
+    { code: 'HAC', name: 'HAC FootGolf', short_name: 'HAC', sort_order: 3 },
+    { code: 'RMFC', name: 'RMFC', short_name: 'RMFC', sort_order: 4 },
+    { code: 'NONE', name: 'Sans club', short_name: 'Sans club', sort_order: 99 },
+  ];
+  for (const d of defaults) {
+    const [row] = await Club.findOrCreate({
+      where: { code: d.code },
+      defaults: d,
+    });
+  }
+  const ssfg = await Club.findOne({ where: { code: 'SSFG' } });
+  if (ssfg) {
+    const [n] = await User.update(
+      { club_id: ssfg.id },
+      { where: { club_id: null } }
+    );
+    if (n) console.log(`➕ ${n} joueur(s) rattachés à SSFG`);
+  }
+  console.log('✅ Clubs seed OK');
+}
+
 async function start() {
   try {
     await sequelize.authenticate();
@@ -122,6 +149,7 @@ async function start() {
     } catch (e) {}
 
     await sequelize.sync();
+    await seedClubs();
       console.log('✅ sequelize.sync OK');
     } catch (syncErr) {
       console.error('❌ sequelize.sync:', syncErr);
