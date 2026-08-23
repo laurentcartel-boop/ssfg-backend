@@ -84,6 +84,17 @@ async function migrateMatchPlay() {
 
 async function seedClubs() {
   const { Club, User } = require('./models');
+
+  // Colonne club_id (sync sans alter ne l’ajoute pas sur table users existante)
+  try {
+    await sequelize.query(
+      'ALTER TABLE users ADD COLUMN club_id CHAR(36) NULL'
+    );
+    console.log('➕ users.club_id');
+  } catch (e) {
+    // déjà présente
+  }
+
   const defaults = [
     { code: 'SSFG', name: 'Saint-Saëns FootGolf', short_name: 'SSFG', sort_order: 1 },
     { code: 'AFG', name: 'AFG', short_name: 'AFG', sort_order: 2 },
@@ -92,7 +103,7 @@ async function seedClubs() {
     { code: 'NONE', name: 'Sans club', short_name: 'Sans club', sort_order: 99 },
   ];
   for (const d of defaults) {
-    const [row] = await Club.findOrCreate({
+    await Club.findOrCreate({
       where: { code: d.code },
       defaults: d,
     });
@@ -140,16 +151,15 @@ async function start() {
     }
 
     try {
-      
-    try {
       await sequelize.query(
         'ALTER TABLE accounting_entries ADD COLUMN attachment_url LONGTEXT NULL'
       );
       console.log('➕ accounting_entries.attachment_url');
     } catch (e) {}
 
-    await sequelize.sync();
-    await seedClubs();
+    try {
+      await sequelize.sync();
+      await seedClubs();
       console.log('✅ sequelize.sync OK');
     } catch (syncErr) {
       console.error('❌ sequelize.sync:', syncErr);
