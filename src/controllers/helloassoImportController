@@ -1,5 +1,5 @@
 const { Op } = require('sequelize');
-const { User, Club, Course, Competition } = require('../models');
+const { User, Club, Course, Competition, CompetitionRegistration } = require('../models');
 
 const CLUB_ALIASES = {
   SSFG: 'SSFG',
@@ -125,6 +125,21 @@ function sanitizeBirthIso(iso) {
   if (y >= 2800 && y <= 2999) y -= 1000;
   if (y < 1920 || y > 2018) return null;
   return `${y}-${m[2]}-${m[3]}`;
+}
+
+function normalizeArrival(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  // 17:30 or 17h30 or 17.30
+  let m = s.match(/^(\d{1,2})\s*[hH:.]\s*(\d{2})/);
+  if (m) {
+    const hh = String(Math.min(23, Number(m[1]))).padStart(2, '0');
+    const mm = m[2];
+    return `${hh}:${mm}`;
+  }
+  m = s.match(/^(\d{1,2})\s*[hH]?$/);
+  if (m) return `${String(Number(m[1])).padStart(2, '0')}:00`;
+  return s.slice(0, 10);
 }
 
 function rowKey(r) {
@@ -424,6 +439,30 @@ async function importHelloAsso(req, res) {
       });
     }
 
+    // Inscrits compétition + horaires d'arrivée
+    let registered = 0;
+    for (const p of preview) {
+      const uid = p.user_id;
+      if (!uid) continue;
+      const arrival = normalizeArrival(p.arrival);
+      const [reg, wasCreated] = await CompetitionRegistration.findOrCreate({
+        where: { competition_id: competition.id, user_id: uid },
+        defaults: {
+          competition_id: competition.id,
+          user_id: uid,
+          arrival_time: arrival,
+          ticket: p.ticket || null,
+        },
+      });
+      if (!wasCreated && arrival) {
+        await reg.update({
+          arrival_time: arrival,
+          ticket: p.ticket || reg.ticket,
+        });
+      }
+      registered += 1;
+    }
+
     res.status(201).json({
       message: 'Import HelloAsso terminé',
       competition: {
@@ -433,10 +472,11 @@ async function importHelloAsso(req, res) {
       },
       created_count: created.length,
       existing_count: linked.length,
+      registered_count: registered,
       created,
       existing: linked,
       temp_password: tempPassword,
-      hint: 'Créez les squads depuis la compétition. Mot de passe temporaire pour les nouveaux comptes.',
+      hint: 'Inscrits visibles dans la compétition. Composez les squads (groupes forcés puis tirage auto).',
     });
   } catch (err) {
     console.error('importHelloAsso', err);
