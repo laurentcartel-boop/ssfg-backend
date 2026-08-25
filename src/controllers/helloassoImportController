@@ -42,19 +42,41 @@ function excelSerialToIso(n) {
 function parseBirth(raw) {
   if (raw == null || raw === '') return null;
 
+  // Objet Date (xlsx cellDates: true)
+  if (raw instanceof Date && !Number.isNaN(raw.getTime())) {
+    const y = raw.getFullYear();
+    const mo = String(raw.getMonth() + 1).padStart(2, '0');
+    const day = String(raw.getDate()).padStart(2, '0');
+    return sanitizeBirthIso(`${y}-${mo}-${day}`);
+  }
+  // Date sérialisée JSON / string ISO complète
+  if (typeof raw === 'object' && raw !== null && raw.toISOString) {
+    try {
+      return sanitizeBirthIso(raw.toISOString().slice(0, 10));
+    } catch (e) {}
+  }
+
   // Numéro de série Excel (souvent renvoyé par xlsx)
   if (typeof raw === 'number' && raw > 20000 && raw < 60000) {
     return sanitizeBirthIso(excelSerialToIso(raw));
   }
 
   let s = String(raw).trim();
+  // "Fri Jun 05 1981 00:00:00 GMT+..." 
+  const asDate = new Date(s);
+  if (!Number.isNaN(asDate.getTime()) && /[a-zA-Z]/.test(s) && s.length > 10) {
+    const y = asDate.getFullYear();
+    const mo = String(asDate.getMonth() + 1).padStart(2, '0');
+    const day = String(asDate.getDate()).padStart(2, '0');
+    return sanitizeBirthIso(`${y}-${mo}-${day}`);
+  }
 
   // Date JS sérialisée
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
     return sanitizeBirthIso(s.slice(0, 10));
   }
 
-  // JJ/MM/AAAA ou JJ-MM-AAAA
+  // Format HelloAsso / FR : 21/05/1965 ou 21-05-1965 ou 21.05.1965
   let m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
   if (m) {
     const day = m[1].padStart(2, '0');
@@ -62,7 +84,29 @@ function parseBirth(raw) {
     return sanitizeBirthIso(`${m[3]}-${mo}-${day}`);
   }
 
-  // Nombre en texte
+  // Texte FR : "21 mai 1965"
+  const monthsFr = {
+    janvier: '01', janv: '01',
+    fevrier: '02', 'février': '02', fevr: '02',
+    mars: '03',
+    avril: '04',
+    mai: '05',
+    juin: '06',
+    juillet: '07', juil: '07',
+    aout: '08', 'août': '08',
+    septembre: '09', sept: '09',
+    octobre: '10', oct: '10',
+    novembre: '11', nov: '11',
+    decembre: '12', 'décembre': '12', dec: '12',
+  };
+  m = s.toLowerCase().match(/^(\d{1,2})\s+([a-zéûô]+)\.?\s+(\d{4})$/i);
+  if (m) {
+    const day = m[1].padStart(2, '0');
+    const mo = monthsFr[m[2].toLowerCase()];
+    if (mo) return sanitizeBirthIso(`${m[3]}-${mo}-${day}`);
+  }
+
+  // Nombre en texte (série Excel)
   const num = Number(s);
   if (!Number.isNaN(num) && num > 20000 && num < 60000) {
     return sanitizeBirthIso(excelSerialToIso(num));
@@ -288,7 +332,8 @@ async function importHelloAsso(req, res) {
         if (u) {
           const patch = {};
           if (!u.club_id && p._club_id) patch.club_id = p._club_id;
-          if (!u.birth_date && p.birth_date) patch.birth_date = p.birth_date;
+          // Toujours (ré)écrire la date si l'import en a une valide
+          if (p.birth_date) patch.birth_date = p.birth_date;
           if (Object.keys(patch).length) await u.update(patch);
           linked.push({ id: u.id, name: `${u.last_name} ${u.first_name}` });
         }
