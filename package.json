@@ -9,7 +9,12 @@
     "db:migrate": "node src/db/migrate.js",
     "db:seed": "node src/db/seed.js"
   },
-  "keywords": ["footgolf", "scoring", "index", "ssfg"],
+  "keywords": [
+    "footgolf",
+    "scoring",
+    "index",
+    "ssfg"
+  ],
   "author": "SSFG",
   "license": "UNLICENSED",
   "dependencies": {
@@ -20,7 +25,8 @@
     "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.11.0",
     "sequelize": "^6.37.3",
-    "uuid": "^10.0.0"
+    "uuid": "^10.0.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "nodemon": "^3.1.4"
