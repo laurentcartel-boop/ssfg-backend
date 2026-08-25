@@ -210,9 +210,10 @@ async function importHelloAsso(req, res) {
         const XLSX = require('xlsx');
         const b64 = String(file_base64).replace(/^data:[^;]+;base64,/, '');
         const buf = Buffer.from(b64, 'base64');
-        const wb = XLSX.read(buf, { type: 'buffer', cellDates: true, raw: false });
+        const wb = XLSX.read(buf, { type: 'buffer', cellDates: true });
         const sheet = wb.Sheets[wb.SheetNames[0]];
-        rawRows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
+        // raw:true → objets Date pour les cellules date (plus fiable que le texte localisé)
+        rawRows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: true });
       } catch (e) {
         return res.status(400).json({
           error:
@@ -357,9 +358,17 @@ async function importHelloAsso(req, res) {
         if (u) {
           const patch = {};
           if (!u.club_id && p._club_id) patch.club_id = p._club_id;
-          // Toujours (ré)écrire la date si l'import en a une valide
           if (p.birth_date) patch.birth_date = p.birth_date;
-          if (Object.keys(patch).length) await u.update(patch);
+          if (Object.keys(patch).length) {
+            await u.update(patch);
+            // force SQL si Sequelize ignore DATEONLY identique/null
+            if (p.birth_date) {
+              await User.update(
+                { birth_date: p.birth_date },
+                { where: { id: u.id } }
+              );
+            }
+          }
           linked.push({ id: u.id, name: `${u.last_name} ${u.first_name}` });
         }
         continue;
@@ -379,12 +388,16 @@ async function importHelloAsso(req, res) {
         first_name: p.first_name,
         last_name: p.last_name,
         role: 'joueur',
-        birth_date: p.birth_date,
-        club_id: p._club_id,
+        birth_date: p.birth_date || null,
+        club_id: p._club_id || null,
         index_value: 1.0,
         must_change_password: true,
         is_active: true,
       });
+      // Double écriture si besoin (certains sync MySQL)
+      if (p.birth_date) {
+        await user.update({ birth_date: p.birth_date });
+      }
       byEmail.set(email, user);
       byName.set(rowKey(p), user);
       created.push({
