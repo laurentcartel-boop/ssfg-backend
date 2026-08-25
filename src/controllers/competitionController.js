@@ -304,4 +304,383 @@ module.exports = {
   addSquad,
   closeCompetition,
   deleteCompetition,
+  listRegistrations,
+  setForcedGroups,
+  composeSquads,
 };
+
+function timeToMinutes(t) {
+  if (!t) return null;
+  const m = String(t).match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+function minutesToTime(mins) {
+  const h = Math.floor(mins / 60) % 24;
+  const m = mins % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+/**
+ * GET /api/competitions/:id/registrations
+ */
+async function listRegistrations(req, res) {
+  try {
+    const { CompetitionRegistration, User, Club } = require('../models');
+    const regs = await CompetitionRegistration.findAll({
+      where: { competition_id: req.params.id },
+      include: [
+        {
+          model: User,
+          as: 'user',
+          attributes: [
+            'id',
+            'first_name',
+            'last_name',
+            'index_value',
+            'club_id',
+            'email',
+          ],
+          include: [
+            {
+              model: Club,
+              as: 'club',
+              attributes: ['id', 'code', 'short_name'],
+              required: false,
+            },
+          ],
+        },
+      ],
+      order: [
+        ['arrival_time', 'ASC'],
+        ['created_at', 'ASC'],
+      ],
+    });
+
+    // Joueurs déjà dans un squad
+    const competition = await Competition.findByPk(req.params.id, {
+      include: [
+        {
+          model: Round,
+          as: 'squads',
+          include: [{ model: RoundPlayer, as: 'players' }],
+        },
+      ],
+    });
+    const assigned = new Set();
+    for (const s of competition?.squads || []) {
+      for (const p of s.players || []) assigned.add(p.user_id);
+    }
+
+    res.json({
+      registrations: regs.map((r) => ({
+        id: r.id,
+        user_id: r.user_id,
+        arrival_time: r.arrival_time,
+        ticket: r.ticket,
+        forced_group: r.forced_group,
+        notes: r.notes,
+        assigned: assigned.has(r.user_id),
+        user: r.user
+          ? {
+              id: r.user.id,
+              first_name: r.user.first_name,
+              last_name: r.user.last_name,
+              index_value: r.user.index_value,
+              club: r.user.club
+                ? {
+                    code: r.user.club.code,
+                    short_name: r.user.club.short_name,
+                  }
+                : null,
+            }
+          : null,
+      })),
+    });
+  } catch (err) {
+    console.error('listRegistrations', err);
+    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+  }
+}
+
+/**
+ * PATCH registrations forced groups
+ * Body: { groups: [ { label: 'A', user_ids: [] } ] } or { user_id, forced_group }
+ */
+async function setForcedGroups(req, res) {
+  try {
+    const { CompetitionRegistration } = require('../models');
+    const competitionId = req.params.id;
+    const competition = await Competition.findByPk(competitionId);
+    if (!competition) return res.status(404).json({ error: 'Compétition non trouvée' });
+    if (competition.status === 'closed') {
+      return res.status(400).json({ error: 'Compétition clôturée' });
+    }
+
+    if (Array.isArray(req.body.groups)) {
+      // reset all forced groups for this competition first for listed users
+      for (const g of req.body.groups) {
+        const label = String(g.label || g.forced_group || '').trim() || null;
+        const ids = g.user_ids || [];
+        for (const uid of ids) {
+          await CompetitionRegistration.update(
+            { forced_group: label },
+            { where: { competition_id: competitionId, user_id: uid } }
+          );
+        }
+      }
+    } else if (req.body.user_id) {
+      await CompetitionRegistration.update(
+        { forced_group: req.body.forced_group || null },
+        {
+          where: {
+            competition_id: competitionId,
+            user_id: req.body.user_id,
+          },
+        }
+      );
+    } else if (req.body.clear_all) {
+      await CompetitionRegistration.update(
+        { forced_group: null },
+        { where: { competition_id: competitionId } }
+      );
+    } else {
+      return res.status(400).json({ error: 'groups ou user_id requis' });
+    }
+
+    return listRegistrations(req, res);
+  } catch (err) {
+    console.error('setForcedGroups', err);
+    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+  }
+}
+
+/**
+ * POST /api/competitions/:id/compose-squads
+ * Body: {
+ *   interval_minutes?: 5,
+ *   squad_size?: 3,
+ *   arrival_tolerance?: 20,
+ *   max_same_club?: 2,
+ *   create_forced?: true  // crée d'abord les groupes forcés en squads
+ * }
+ */
+async function composeSquads(req, res) {
+  const t = await sequelize.transaction();
+  try {
+    const { CompetitionRegistration, User, Club } = require('../models');
+    const competitionId = req.params.id;
+    const competition = await Competition.findByPk(competitionId);
+    if (!competition) {
+      await t.rollback();
+      return res.status(404).json({ error: 'Compétition non trouvée' });
+    }
+    if (competition.status === 'closed') {
+      await t.rollback();
+      return res.status(400).json({ error: 'Compétition clôturée' });
+    }
+
+    const squadSize = Number(req.body.squad_size) || 3;
+    const tolerance = Number(req.body.arrival_tolerance) || 20;
+    const maxSameClub = Number(req.body.max_same_club) || 2;
+    const interval = Number(req.body.interval_minutes) || 5;
+    const createForced = req.body.create_forced !== false;
+
+    const regs = await CompetitionRegistration.findAll({
+      where: { competition_id: competitionId },
+      include: [
+        {
+          model: User,
+          as: 'user',
+          include: [{ model: Club, as: 'club', required: false }],
+        },
+      ],
+      transaction: t,
+    });
+
+    // Already in a squad?
+    const existingSquads = await Round.findAll({
+      where: { competition_id: competitionId },
+      include: [{ model: RoundPlayer, as: 'players' }],
+      transaction: t,
+    });
+    const assigned = new Set();
+    for (const s of existingSquads) {
+      for (const p of s.players || []) assigned.add(p.user_id);
+    }
+
+    const pool = regs
+      .filter((r) => r.user && !assigned.has(r.user_id))
+      .map((r) => ({
+        user_id: r.user_id,
+        arrival: r.arrival_time,
+        arrivalMin: timeToMinutes(r.arrival_time),
+        club: r.user.club?.code || r.user.club?.short_name || 'NONE',
+        forced_group: r.forced_group || null,
+        name: `${r.user.last_name} ${r.user.first_name}`,
+        index_value: r.user.index_value,
+      }));
+
+    const createdSquads = [];
+
+    async function createSquadRound(name, playerIds, startLabel) {
+      const round = await Round.create(
+        {
+          name: name.trim(),
+          type: 'competition',
+          course_id: competition.course_id,
+          date: competition.date,
+          status: 'in_progress',
+          created_by: req.user.id,
+          competition_id: competition.id,
+        },
+        { transaction: t }
+      );
+      for (const userId of playerIds) {
+        const user = await User.findByPk(userId, { transaction: t });
+        if (!user) continue;
+        await RoundPlayer.create(
+          {
+            round_id: round.id,
+            user_id: userId,
+            starting_index: user.index_value,
+          },
+          { transaction: t }
+        );
+        assigned.add(userId);
+      }
+      createdSquads.push({
+        id: round.id,
+        name: round.name,
+        start: startLabel,
+        player_ids: playerIds,
+      });
+      return round;
+    }
+
+    // 1) Groupes forcés → squads
+    if (createForced) {
+      const byGroup = new Map();
+      for (const p of pool) {
+        if (!p.forced_group) continue;
+        if (assigned.has(p.user_id)) continue;
+        if (!byGroup.has(p.forced_group)) byGroup.set(p.forced_group, []);
+        byGroup.get(p.forced_group).push(p);
+      }
+      for (const [label, members] of byGroup) {
+        if (members.length < 2) continue; // min 2 pour un squad
+        // si > 4, découper en paquets de squadSize
+        for (let i = 0; i < members.length; i += Math.max(squadSize, 2)) {
+          const chunk = members.slice(i, i + Math.max(squadSize, 4));
+          if (chunk.length < 2) break;
+          const times = chunk.map((m) => m.arrivalMin).filter((x) => x != null);
+          const startMin = times.length ? Math.min(...times) : null;
+          const startLabel = startMin != null ? minutesToTime(startMin) : '—';
+          const squadName =
+            chunk.length === members.length
+              ? `Forcé ${label} · ${startLabel}`
+              : `Forcé ${label} (${i / squadSize + 1}) · ${startLabel}`;
+          await createSquadRound(
+            squadName,
+            chunk.map((c) => c.user_id),
+            startLabel
+          );
+        }
+      }
+    }
+
+    // 2) Reste : tirage auto
+    let remaining = pool.filter((p) => !assigned.has(p.user_id));
+    remaining.sort((a, b) => {
+      const am = a.arrivalMin ?? 9999;
+      const bm = b.arrivalMin ?? 9999;
+      if (am !== bm) return am - bm;
+      return a.name.localeCompare(b.name, 'fr');
+    });
+
+    let squadIndex = createdSquads.length + 1;
+    let lastStart = null;
+
+    while (remaining.length >= 2) {
+      const seed = remaining[0];
+      const seedMin = seed.arrivalMin;
+      const candidates = remaining.filter((p) => {
+        if (seedMin == null || p.arrivalMin == null) return true;
+        return Math.abs(p.arrivalMin - seedMin) <= tolerance;
+      });
+
+      const squad = [];
+      const clubCount = {};
+
+      function tryAdd(p) {
+        const c = p.club || 'NONE';
+        if ((clubCount[c] || 0) >= maxSameClub) return false;
+        squad.push(p);
+        clubCount[c] = (clubCount[c] || 0) + 1;
+        return true;
+      }
+
+      tryAdd(seed);
+      for (const p of candidates) {
+        if (squad.length >= squadSize) break;
+        if (p.user_id === seed.user_id) continue;
+        tryAdd(p);
+      }
+
+      // Si < 2, élargir sans contrainte horaire
+      if (squad.length < 2) {
+        for (const p of remaining) {
+          if (squad.length >= 2) break;
+          if (squad.find((x) => x.user_id === p.user_id)) continue;
+          tryAdd(p);
+        }
+      }
+
+      if (squad.length < 2) break;
+
+      // Si 4 restants et size 3, préférer 2+2 plutôt que 3+1 isolé — optionnel: si remaining après = 1, prendre 2
+      let finalSquad = squad.slice(0, squadSize);
+      const afterCount = remaining.length - finalSquad.length;
+      if (afterCount === 1 && finalSquad.length === squadSize && remaining.length >= 4) {
+        finalSquad = squad.slice(0, 2);
+      }
+
+      const times = finalSquad.map((m) => m.arrivalMin).filter((x) => x != null);
+      let startMin = times.length ? Math.min(...times) : null;
+      if (startMin != null && lastStart != null && startMin < lastStart + interval) {
+        startMin = lastStart + interval;
+      }
+      if (startMin != null) lastStart = startMin;
+      const startLabel = startMin != null ? minutesToTime(startMin) : '—';
+
+      await createSquadRound(
+        `Squad ${squadIndex} · départ ${startLabel}`,
+        finalSquad.map((c) => c.user_id),
+        startLabel
+      );
+      squadIndex += 1;
+
+      const used = new Set(finalSquad.map((c) => c.user_id));
+      remaining = remaining.filter((p) => !used.has(p.user_id));
+    }
+
+    await t.commit();
+
+    res.status(201).json({
+      message: `${createdSquads.length} squad(s) créé(s)`,
+      squads: createdSquads,
+      unassigned: remaining.map((p) => ({
+        user_id: p.user_id,
+        name: p.name,
+        arrival: p.arrival,
+        club: p.club,
+      })),
+    });
+  } catch (err) {
+    await t.rollback();
+    console.error('composeSquads', err);
+    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+  }
+}
+
