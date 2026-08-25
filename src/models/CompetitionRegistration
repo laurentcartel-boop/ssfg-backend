@@ -1,0 +1,48 @@
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
+
+const CompetitionRegistration = sequelize.define(
+  'CompetitionRegistration',
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    competition_id: {
+      type: DataTypes.UUID,
+      allowNull: false,
+    },
+    user_id: {
+      type: DataTypes.UUID,
+      allowNull: false,
+    },
+    arrival_time: {
+      type: DataTypes.STRING(10),
+      allowNull: true,
+      comment: 'HH:MM',
+    },
+    ticket: {
+      type: DataTypes.STRING(40),
+      allowNull: true,
+    },
+    forced_group: {
+      type: DataTypes.STRING(40),
+      allowNull: true,
+      comment: 'Même code = jouent ensemble (groupe forcé)',
+    },
+    notes: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+    },
+  },
+  {
+    tableName: 'competition_registrations',
+    indexes: [
+      { fields: ['competition_id'] },
+      { unique: true, fields: ['competition_id', 'user_id'] },
+    ],
+  }
+);
+
+module.exports = CompetitionRegistration;
