@@ -135,29 +135,48 @@ function rowKey(r) {
  * Normalise une ligne HelloAsso (clés FR export).
  */
 function normalizeRow(raw) {
-  const get = (...keys) => {
-    for (const k of keys) {
-      if (raw[k] != null && String(raw[k]).trim() !== '') return String(raw[k]).trim();
+  // Clés réelles de la ligne (Excel peut varier espaces / casse / accents)
+  const entries = Object.entries(raw || {});
+  const findVal = (...needles) => {
+    for (const [k, v] of entries) {
+      if (v == null || v === '') continue;
+      const nk = norm(k);
+      for (const n of needles) {
+        if (nk === norm(n) || nk.includes(norm(n))) {
+          return v; // garde le type (Date | number | string)
+        }
+      }
     }
     return '';
   };
+
+  const birthRaw =
+    findVal('date de naissance', 'naissance', 'birth') ||
+    raw['Date de naissance'] ||
+    raw['birth_date'] ||
+    '';
+
+  const last = findVal('nom participant', 'last_name') || findVal('nom') || '';
+  const first =
+    findVal('prenom participant', 'prénom participant', 'first_name') ||
+    findVal('prenom', 'prénom') ||
+    '';
+
   return {
-    ticket: get('Numéro de billet', 'Numero de billet', 'ticket', 'num_billet'),
-    status: get('Statut de la commande', 'status'),
-    last_name: get('Nom participant', 'Nom', 'last_name'),
-    first_name: get('Prénom participant', 'Prenom participant', 'Prénom', 'first_name'),
-    email: get(
-      'Email participant',
-      'Email du participant',
-      'Email payeur',
-      'email'
+    ticket: String(findVal('numero de billet', 'numéro de billet', 'ticket') || ''),
+    status: String(findVal('statut de la commande', 'statut', 'status') || ''),
+    last_name: String(last).trim(),
+    first_name: String(first).trim(),
+    email: String(
+      findVal('email participant', 'email du participant', 'email payeur', 'email') || ''
     )
       .toLowerCase()
       .trim(),
-    birth_date: parseBirth(get('Date de naissance', 'birth_date')),
-    club_raw: get('Club', 'club'),
-    arrival: get("Horaires d'arrivée", "Horaires d'arrivee", 'arrival'),
-    order_ref: get('Référence commande', 'Reference commande', 'order_ref'),
+    birth_date: parseBirth(birthRaw),
+    birth_raw: birthRaw, // debug
+    club_raw: String(findVal('club') || ''),
+    arrival: String(findVal('horaires', 'arrivee', 'arrivée') || ''),
+    order_ref: String(findVal('reference commande', 'référence commande') || ''),
   };
 }
 
@@ -305,7 +324,13 @@ async function importHelloAsso(req, res) {
         club_code: clubCode,
         birth_date: r.birth_date,
         arrival: r.arrival,
-        note: emailNote,
+        note:
+          emailNote ||
+          (r.birth_date
+            ? ''
+            : r.birth_raw != null && r.birth_raw !== ''
+              ? `Date non lue (brut: ${String(r.birth_raw).slice(0, 30)})`
+              : 'Date de naissance absente dans le fichier'),
         user_id: existing ? existing.id : null,
         _emailForCreate: emailToUse,
         _club_id: club ? club.id : null,
