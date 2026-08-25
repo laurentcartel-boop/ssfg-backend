@@ -28,14 +28,59 @@ function mapClubCode(raw) {
   return 'NONE';
 }
 
+function excelSerialToIso(n) {
+  // Excel serial date (jours depuis 1899-12-30, avec bug 1900)
+  const ms = Math.round((n - 25569) * 86400 * 1000);
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return null;
+  const y = d.getUTCFullYear();
+  const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${mo}-${day}`;
+}
+
 function parseBirth(raw) {
-  if (!raw) return null;
-  const s = String(raw).trim().slice(0, 10);
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (raw == null || raw === '') return null;
+
+  // Numéro de série Excel (souvent renvoyé par xlsx)
+  if (typeof raw === 'number' && raw > 20000 && raw < 60000) {
+    return sanitizeBirthIso(excelSerialToIso(raw));
+  }
+
+  let s = String(raw).trim();
+
+  // Date JS sérialisée
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    return sanitizeBirthIso(s.slice(0, 10));
+  }
+
+  // JJ/MM/AAAA ou JJ-MM-AAAA
+  let m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
+  if (m) {
+    const day = m[1].padStart(2, '0');
+    const mo = m[2].padStart(2, '0');
+    return sanitizeBirthIso(`${m[3]}-${mo}-${day}`);
+  }
+
+  // Nombre en texte
+  const num = Number(s);
+  if (!Number.isNaN(num) && num > 20000 && num < 60000) {
+    return sanitizeBirthIso(excelSerialToIso(num));
+  }
+
+  return null;
+}
+
+/** Corrige fautes type 2965 → 1965 et valide la plage */
+function sanitizeBirthIso(iso) {
+  if (!iso) return null;
+  const m = String(iso).slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return null;
-  const y = Number(m[1]);
+  let y = Number(m[1]);
+  // Faute de frappe fréquente 29xx / 28xx au lieu de 19xx
+  if (y >= 2800 && y <= 2999) y -= 1000;
   if (y < 1920 || y > 2018) return null;
-  return s;
+  return `${y}-${m[2]}-${m[3]}`;
 }
 
 function rowKey(r) {
@@ -102,9 +147,9 @@ async function importHelloAsso(req, res) {
         const XLSX = require('xlsx');
         const b64 = String(file_base64).replace(/^data:[^;]+;base64,/, '');
         const buf = Buffer.from(b64, 'base64');
-        const wb = XLSX.read(buf, { type: 'buffer' });
+        const wb = XLSX.read(buf, { type: 'buffer', cellDates: true, raw: false });
         const sheet = wb.Sheets[wb.SheetNames[0]];
-        rawRows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+        rawRows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
       } catch (e) {
         return res.status(400).json({
           error:
