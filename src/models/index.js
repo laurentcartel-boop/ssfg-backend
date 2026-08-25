@@ -7,6 +7,7 @@ const RoundPlayer = require('./RoundPlayer');
 const HoleScore = require('./HoleScore');
 const IndexHistory = require('./IndexHistory');
 const Competition = require('./Competition');
+const CompetitionRegistration = require('./CompetitionRegistration');
 const Article = require('./Article');
 const MatchPlayChampionship = require('./MatchPlayChampionship');
 const MatchPlayMatch = require('./MatchPlayMatch');
@@ -38,6 +39,10 @@ Competition.belongsTo(Course, { foreignKey: 'course_id', as: 'course' });
 Competition.belongsTo(User, { foreignKey: 'created_by', as: 'creator' });
 Competition.belongsTo(User, { foreignKey: 'closed_by', as: 'closer' });
 Competition.hasMany(Round, { foreignKey: 'competition_id', as: 'squads' });
+Competition.hasMany(CompetitionRegistration, { foreignKey: 'competition_id', as: 'registrations' });
+CompetitionRegistration.belongsTo(Competition, { foreignKey: 'competition_id', as: 'competition' });
+CompetitionRegistration.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+User.hasMany(CompetitionRegistration, { foreignKey: 'user_id', as: 'competitionRegistrations' });
 
 // Round players / scores
 RoundPlayer.belongsTo(Round, { foreignKey: 'round_id', as: 'round' });
@@ -89,6 +94,7 @@ module.exports = {
   HoleScore,
   IndexHistory,
   Competition,
+  CompetitionRegistration,
   Article,
   MatchPlayChampionship,
   MatchPlayMatch,
