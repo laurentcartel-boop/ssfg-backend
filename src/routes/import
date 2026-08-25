@@ -1,0 +1,13 @@
+const express = require('express');
+const router = express.Router();
+const { authenticate, requireRole } = require('../middleware/auth');
+const { importHelloAsso } = require('../controllers/helloassoImportController');
+
+router.use(authenticate);
+router.post(
+  '/helloasso',
+  requireRole('admin', 'super_admin'),
+  importHelloAsso
+);
+
+module.exports = router;
