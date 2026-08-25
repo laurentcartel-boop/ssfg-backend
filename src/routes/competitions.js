@@ -6,6 +6,9 @@ const { authenticate, requireRole } = require('../middleware/auth');
 router.use(authenticate);
 
 router.get('/', competitionController.listCompetitions);
+router.get('/:id/registrations', competitionController.listRegistrations);
+router.patch('/:id/forced-groups', requireRole('admin', 'super_admin'), competitionController.setForcedGroups);
+router.post('/:id/compose-squads', requireRole('admin', 'super_admin'), competitionController.composeSquads);
 router.get('/:id', competitionController.getCompetition);
 router.post('/', requireRole('admin', 'super_admin'), competitionController.createCompetition);
 router.post('/:id/squads', requireRole('admin', 'super_admin'), competitionController.addSquad);
