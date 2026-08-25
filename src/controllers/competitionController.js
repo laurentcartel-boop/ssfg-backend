@@ -70,7 +70,15 @@ async function getCompetition(req, res) {
                 {
                   model: User,
                   as: 'user',
-                  attributes: ['id', 'first_name', 'last_name', 'index_value', 'gender'],
+                  attributes: ['id', 'first_name', 'last_name', 'index_value', 'gender', 'club_id'],
+                  include: [
+                    {
+                      model: require('../models').Club,
+                      as: 'club',
+                      attributes: ['id', 'code', 'short_name'],
+                      required: false,
+                    },
+                  ],
                 },
                 { model: HoleScore, as: 'holeScores' },
               ],
@@ -481,7 +489,9 @@ async function composeSquads(req, res) {
       return res.status(400).json({ error: 'Compétition clôturée' });
     }
 
+    // squad_size = taille préférée (3), max_squad_size = plafond (4)
     const squadSize = Number(req.body.squad_size) || 3;
+    const maxSquadSize = Number(req.body.max_squad_size) || 4;
     const tolerance = Number(req.body.arrival_tolerance) || 20;
     const maxSameClub = Number(req.body.max_same_club) || 2;
     const interval = Number(req.body.interval_minutes) || 5;
@@ -623,7 +633,7 @@ async function composeSquads(req, res) {
 
       tryAdd(seed);
       for (const p of candidates) {
-        if (squad.length >= squadSize) break;
+        if (squad.length >= maxSquadSize) break;
         if (p.user_id === seed.user_id) continue;
         tryAdd(p);
       }
@@ -639,12 +649,21 @@ async function composeSquads(req, res) {
 
       if (squad.length < 2) break;
 
-      // Si 4 restants et size 3, préférer 2+2 plutôt que 3+1 isolé — optionnel: si remaining après = 1, prendre 2
-      let finalSquad = squad.slice(0, squadSize);
-      const afterCount = remaining.length - finalSquad.length;
-      if (afterCount === 1 && finalSquad.length === squadSize && remaining.length >= 4) {
-        finalSquad = squad.slice(0, 2);
+      // Préférer 3, autoriser 4 ; jamais laisser 1 seul
+      let target = Math.min(squadSize, squad.length);
+      const afterIfTarget = remaining.length - target;
+      if (afterIfTarget === 1 && squad.length >= 4) {
+        // 3+1 → plutôt 4, ou 2+2
+        target = 4;
+      } else if (afterIfTarget === 1 && squad.length === 3) {
+        target = 2; // 2+2 au prochain tour si possible
+      } else if (squad.length > squadSize && remaining.length - squadSize !== 1) {
+        target = squadSize;
+      } else if (squad.length >= maxSquadSize) {
+        target = maxSquadSize;
       }
+      let finalSquad = squad.slice(0, Math.min(target, squad.length));
+      if (finalSquad.length < 2) break;
 
       const times = finalSquad.map((m) => m.arrivalMin).filter((x) => x != null);
       let startMin = times.length ? Math.min(...times) : null;
