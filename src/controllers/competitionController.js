@@ -305,11 +305,206 @@ async function deleteCompetition(req, res) {
   }
 }
 
+
+/**
+ * PATCH /api/competitions/:id/squads/:squadId
+ * Modifier nom et/ou joueurs d'un squad (avant lancement)
+ * Body: { name?, player_ids? }
+ */
+async function updateSquad(req, res) {
+  const t = await sequelize.transaction();
+  try {
+    const competition = await Competition.findByPk(req.params.id);
+    if (!competition) {
+      await t.rollback();
+      return res.status(404).json({ error: 'Compétition non trouvée' });
+    }
+    if (competition.status === 'closed') {
+      await t.rollback();
+      return res.status(400).json({ error: 'Compétition clôturée' });
+    }
+    if (competition.launched_at) {
+      await t.rollback();
+      return res.status(400).json({
+        error: 'Compétition déjà lancée — débloquez-la ou ajustez avant lancement',
+      });
+    }
+
+    const squad = await Round.findOne({
+      where: { id: req.params.squadId, competition_id: competition.id },
+      transaction: t,
+    });
+    if (!squad) {
+      await t.rollback();
+      return res.status(404).json({ error: 'Squad introuvable' });
+    }
+    if (squad.status === 'closed') {
+      await t.rollback();
+      return res.status(400).json({ error: 'Squad déjà clôturé' });
+    }
+
+    const { name, player_ids } = req.body;
+    if (name != null && String(name).trim()) {
+      await squad.update({ name: String(name).trim() }, { transaction: t });
+    }
+
+    if (Array.isArray(player_ids)) {
+      if (player_ids.length < 2) {
+        await t.rollback();
+        return res.status(400).json({ error: 'Minimum 2 joueurs par squad' });
+      }
+      // Interdire si des scores existent
+      const existing = await RoundPlayer.findAll({
+        where: { round_id: squad.id },
+        include: [{ model: HoleScore, as: 'holeScores' }],
+        transaction: t,
+      });
+      const hasScores = existing.some((rp) => (rp.holeScores || []).length > 0);
+      if (hasScores) {
+        await t.rollback();
+        return res.status(400).json({
+          error: 'Des scores existent déjà sur ce squad — impossible de modifier la composition',
+        });
+      }
+      await RoundPlayer.destroy({ where: { round_id: squad.id }, transaction: t });
+      for (const userId of player_ids) {
+        const user = await User.findByPk(userId, { transaction: t });
+        if (!user) continue;
+        await RoundPlayer.create(
+          {
+            round_id: squad.id,
+            user_id: userId,
+            starting_index: user.index_value,
+          },
+          { transaction: t }
+        );
+      }
+    }
+
+    await t.commit();
+    const full = await Round.findByPk(squad.id, {
+      include: [
+        {
+          model: RoundPlayer,
+          as: 'players',
+          include: [
+            {
+              model: User,
+              as: 'user',
+              attributes: ['id', 'first_name', 'last_name', 'index_value'],
+            },
+          ],
+        },
+      ],
+    });
+    res.json({ squad: full, message: 'Squad mis à jour' });
+  } catch (err) {
+    await t.rollback();
+    console.error('updateSquad', err);
+    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+  }
+}
+
+/**
+ * DELETE /api/competitions/:id/squads/:squadId
+ * Supprimer un squad (avant lancement, sans scores)
+ */
+async function deleteSquad(req, res) {
+  const t = await sequelize.transaction();
+  try {
+    const competition = await Competition.findByPk(req.params.id);
+    if (!competition) {
+      await t.rollback();
+      return res.status(404).json({ error: 'Compétition non trouvée' });
+    }
+    if (competition.launched_at) {
+      await t.rollback();
+      return res.status(400).json({ error: 'Compétition déjà lancée' });
+    }
+    const squad = await Round.findOne({
+      where: { id: req.params.squadId, competition_id: competition.id },
+      include: [
+        {
+          model: RoundPlayer,
+          as: 'players',
+          include: [{ model: HoleScore, as: 'holeScores' }],
+        },
+      ],
+      transaction: t,
+    });
+    if (!squad) {
+      await t.rollback();
+      return res.status(404).json({ error: 'Squad introuvable' });
+    }
+    const hasScores = (squad.players || []).some(
+      (rp) => (rp.holeScores || []).length > 0
+    );
+    if (hasScores) {
+      await t.rollback();
+      return res.status(400).json({ error: 'Squad avec scores — impossible de supprimer' });
+    }
+    for (const rp of squad.players || []) {
+      await RoundPlayer.destroy({ where: { id: rp.id }, transaction: t });
+    }
+    await squad.destroy({ transaction: t });
+    await t.commit();
+    res.json({ message: 'Squad supprimé' });
+  } catch (err) {
+    await t.rollback();
+    console.error('deleteSquad', err);
+    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+  }
+}
+
+/**
+ * POST /api/competitions/:id/launch
+ * Valider / lancer la compétition (fige la composition)
+ * Body: { unlock?: true } pour super_admin annuler le lancement
+ */
+async function launchCompetition(req, res) {
+  try {
+    const competition = await Competition.findByPk(req.params.id, {
+      include: [{ model: Round, as: 'squads' }],
+    });
+    if (!competition) return res.status(404).json({ error: 'Compétition non trouvée' });
+    if (competition.status === 'closed') {
+      return res.status(400).json({ error: 'Compétition clôturée' });
+    }
+
+    if (req.body && req.body.unlock) {
+      if (req.user.role !== 'super_admin') {
+        return res.status(403).json({ error: 'Super-admin uniquement' });
+      }
+      await competition.update({ launched_at: null });
+      return res.json({
+        competition,
+        message: 'Lancement annulé — composition modifiable à nouveau',
+      });
+    }
+
+    const squads = competition.squads || [];
+    if (squads.length === 0) {
+      return res.status(400).json({ error: 'Aucun squad — composez avant de lancer' });
+    }
+    await competition.update({ launched_at: new Date() });
+    res.json({
+      competition,
+      message: 'Compétition lancée — live scoring actif, composition figée',
+    });
+  } catch (err) {
+    console.error('launchCompetition', err);
+    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+  }
+}
+
 module.exports = {
   listCompetitions,
   getCompetition,
   createCompetition,
   addSquad,
+  updateSquad,
+  deleteSquad,
+  launchCompetition,
   closeCompetition,
   deleteCompetition,
   listRegistrations,
