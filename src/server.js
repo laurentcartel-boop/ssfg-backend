@@ -169,6 +169,30 @@ async function start() {
       );
       console.log('➕ competitions.launched_at');
     } catch (e) {}
+    try {
+      await sequelize.query(
+        "ALTER TABLE competitions ADD COLUMN scope_type ENUM('club','interclub','open') NOT NULL DEFAULT 'open'"
+      );
+      console.log('➕ competitions.scope_type');
+    } catch (e) {}
+    try {
+      await sequelize.query(
+        'ALTER TABLE competitions ADD COLUMN club_id CHAR(36) NULL'
+      );
+      console.log('➕ competitions.club_id');
+    } catch (e) {}
+    try {
+      await sequelize.query(
+        "ALTER TABLE matchplay_championships ADD COLUMN scope_type ENUM('club','interclub','open') NOT NULL DEFAULT 'open'"
+      );
+      console.log('➕ matchplay scope_type');
+    } catch (e) {}
+    try {
+      await sequelize.query(
+        'ALTER TABLE matchplay_championships ADD COLUMN club_id CHAR(36) NULL'
+      );
+      console.log('➕ matchplay club_id');
+    } catch (e) {}
 
     try {
       await sequelize.sync();
