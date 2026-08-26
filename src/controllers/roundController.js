@@ -1,4 +1,4 @@
-    const {
+const {
   Round,
   RoundPlayer,
   HoleScore,
@@ -569,14 +569,14 @@ async function listComments(req, res) {
     const comments = await RoundComment.findAll({
       where: { round_id: req.params.id },
       include: [{ model: User, as: 'user', attributes: ['id', 'first_name', 'last_name'] }],
-      order: [['createdAt', 'ASC']],
-      limit: 100,
+      order: [['created_at', 'ASC']],
+      limit: 500,
     });
     res.json({
       comments: comments.map((c) => ({
         id: c.id,
         message: c.message,
-        created_at: c.createdAt,
+        created_at: c.createdAt || c.created_at,
         display_name: c.display_name,
         user: c.user,
       })),
