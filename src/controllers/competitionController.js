@@ -813,9 +813,9 @@ async function composeSquads(req, res) {
       return res.status(400).json({ error: 'Compétition clôturée' });
     }
 
-    // squad_size = taille préférée (3), max_squad_size = plafond (4)
+    // squads de 3 max (préférence et plafond)
     const squadSize = Number(req.body.squad_size) || 3;
-    const maxSquadSize = Number(req.body.max_squad_size) || 4;
+    const maxSquadSize = Math.min(Number(req.body.max_squad_size) || 3, 3);
     const tolerance = Number(req.body.arrival_tolerance) || 20;
     const maxSameClub = Number(req.body.max_same_club) || 2;
     const interval = Number(req.body.interval_minutes) || 5;
@@ -893,7 +893,7 @@ async function composeSquads(req, res) {
       return round;
     }
 
-    // 1) Groupes forcés → squads
+    // 1) Groupes forcés → squads de 3 (compléter si 2 avec un 3e compatible)
     if (createForced) {
       const byGroup = new Map();
       for (const p of pool) {
@@ -903,18 +903,61 @@ async function composeSquads(req, res) {
         byGroup.get(p.forced_group).push(p);
       }
       for (const [label, members] of byGroup) {
-        if (members.length < 2) continue; // min 2 pour un squad
-        // si > 4, découper en paquets de squadSize
-        for (let i = 0; i < members.length; i += Math.max(squadSize, 2)) {
-          const chunk = members.slice(i, i + Math.max(squadSize, 4));
+        if (members.length < 2) continue;
+        // Découper par paquets de 3 si groupe forcé plus grand
+        for (let i = 0; i < members.length; i += squadSize) {
+          let chunk = members.slice(i, i + squadSize);
           if (chunk.length < 2) break;
+
+          // Si 2 joueurs forcés : ajouter un 3e compatible (horaire ±, max même club)
+          if (chunk.length === 2) {
+            const free = pool.filter((p) => !assigned.has(p.user_id) && !p.forced_group);
+            const times0 = chunk.map((m) => m.arrivalMin).filter((x) => x != null);
+            const seedMin = times0.length ? Math.min(...times0) : null;
+            const clubCount = {};
+            for (const m of chunk) {
+              const c = m.club || 'NONE';
+              clubCount[c] = (clubCount[c] || 0) + 1;
+            }
+            free.sort((a, b) => {
+              const da =
+                seedMin != null && a.arrivalMin != null
+                  ? Math.abs(a.arrivalMin - seedMin)
+                  : 999;
+              const db =
+                seedMin != null && b.arrivalMin != null
+                  ? Math.abs(b.arrivalMin - seedMin)
+                  : 999;
+              return da - db;
+            });
+            for (const cand of free) {
+              if (seedMin != null && cand.arrivalMin != null) {
+                if (Math.abs(cand.arrivalMin - seedMin) > tolerance) continue;
+              }
+              const c = cand.club || 'NONE';
+              if ((clubCount[c] || 0) >= maxSameClub) continue;
+              chunk = [...chunk, cand];
+              break;
+            }
+            // Si aucun dans la tolérance horaire, prendre le plus proche hors tolérance
+            if (chunk.length === 2) {
+              for (const cand of free) {
+                const c = cand.club || 'NONE';
+                if ((clubCount[c] || 0) >= maxSameClub) continue;
+                chunk = [...chunk, cand];
+                break;
+              }
+            }
+          }
+
           const times = chunk.map((m) => m.arrivalMin).filter((x) => x != null);
           const startMin = times.length ? Math.min(...times) : null;
           const startLabel = startMin != null ? minutesToTime(startMin) : '—';
+          const filled = chunk.length === 3 && members.slice(i, i + squadSize).length === 2;
           const squadName =
-            chunk.length === members.length
-              ? `Forcé ${label} · ${startLabel}`
-              : `Forcé ${label} (${i / squadSize + 1}) · ${startLabel}`;
+            chunk.length === members.length || members.length <= squadSize
+              ? `Forcé ${label}${filled ? ' +1' : ''} · ${startLabel}`
+              : `Forcé ${label} (${Math.floor(i / squadSize) + 1}) · ${startLabel}`;
           await createSquadRound(
             squadName,
             chunk.map((c) => c.user_id),
@@ -973,18 +1016,11 @@ async function composeSquads(req, res) {
 
       if (squad.length < 2) break;
 
-      // Préférer 3, autoriser 4 ; jamais laisser 1 seul
-      let target = Math.min(squadSize, squad.length);
+      // Max 3 ; si reste 1 isolé → squads de 2+2
+      let target = Math.min(squadSize, maxSquadSize, squad.length);
       const afterIfTarget = remaining.length - target;
-      if (afterIfTarget === 1 && squad.length >= 4) {
-        // 3+1 → plutôt 4, ou 2+2
-        target = 4;
-      } else if (afterIfTarget === 1 && squad.length === 3) {
-        target = 2; // 2+2 au prochain tour si possible
-      } else if (squad.length > squadSize && remaining.length - squadSize !== 1) {
-        target = squadSize;
-      } else if (squad.length >= maxSquadSize) {
-        target = maxSquadSize;
+      if (afterIfTarget === 1 && target === 3 && remaining.length >= 4) {
+        target = 2;
       }
       let finalSquad = squad.slice(0, Math.min(target, squad.length));
       if (finalSquad.length < 2) break;
