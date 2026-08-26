@@ -36,6 +36,10 @@ const Competition = sequelize.define('Competition', {
     type: DataTypes.DATE,
     allowNull: true,
   },
+  launched_at: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
 }, {
   tableName: 'competitions',
 });
