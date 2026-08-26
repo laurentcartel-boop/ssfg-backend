@@ -180,6 +180,11 @@ async function addPlayer(req, res) {
     if (round.status === 'closed') {
       return res.status(400).json({ error: 'Partie déjà clôturée' });
     }
+    if (round.status === 'draft') {
+      return res.status(400).json({
+        error: 'Squad en préparation — lancez la compétition pour saisir les scores',
+      });
+    }
 
     const { user_id } = req.body;
     if (!user_id) return res.status(400).json({ error: 'user_id requis' });
@@ -231,6 +236,12 @@ async function updateHoleScores(req, res) {
     if (round.status === 'closed') {
       await t.rollback();
       return res.status(400).json({ error: 'Partie clôturée – modification interdite' });
+    }
+    if (round.status === 'draft') {
+      await t.rollback();
+      return res.status(400).json({
+        error: 'Squad en préparation — lancez la compétition pour le live scoring',
+      });
     }
 
     const { hole_number, scores } = req.body;
