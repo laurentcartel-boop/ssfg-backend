@@ -7,6 +7,8 @@ router.use(authenticate);
 
 router.get('/', competitionController.listCompetitions);
 router.get('/:id/registrations', competitionController.listRegistrations);
+router.post('/:id/registrations', requireRole('admin', 'super_admin'), competitionController.addRegistrations);
+router.delete('/:id/registrations/:userId', requireRole('admin', 'super_admin'), competitionController.removeRegistration);
 router.patch('/:id/forced-groups', requireRole('admin', 'super_admin'), competitionController.setForcedGroups);
 router.post('/:id/compose-squads', requireRole('admin', 'super_admin'), competitionController.composeSquads);
 router.get('/:id', competitionController.getCompetition);
