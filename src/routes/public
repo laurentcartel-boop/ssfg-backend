@@ -31,15 +31,20 @@ router.get('/live', async (req, res) => {
       ],
     });
 
+    const { Op } = require('sequelize');
     const competitions = await Competition.findAll({
-      where: { status: 'open' },
+      where: {
+        status: 'open',
+        launched_at: { [Op.ne]: null },
+      },
       order: [['date', 'DESC']],
       include: [
         { model: Course, as: 'course', attributes: ['id', 'name', 'short_name'] },
       ],
     });
+    const launchedIds = new Set(competitions.map((c) => c.id));
 
-    // Ne garder les compétitions qui ont au moins un squad en cours
+    // Compétitions lancées avec au moins un squad in_progress
     const liveComps = [];
     for (const c of competitions) {
       const squads = await Round.count({
@@ -57,7 +62,7 @@ router.get('/live', async (req, res) => {
     }
 
     const liveRounds = rounds
-      .filter((r) => !r.competition_id) // parties libres / hors compétition listées à part
+      .filter((r) => !r.competition_id)
       .map((r) => ({
         id: r.id,
         name: r.name,
@@ -67,9 +72,9 @@ router.get('/live', async (req, res) => {
         players_count: (r.players || []).length,
       }));
 
-    // Aussi lister les squads de compétition en cours
+    // Squads compétition : uniquement si compétition lancée
     const liveSquads = rounds
-      .filter((r) => r.competition_id)
+      .filter((r) => r.competition_id && launchedIds.has(r.competition_id))
       .map((r) => ({
         id: r.id,
         name: r.name,
