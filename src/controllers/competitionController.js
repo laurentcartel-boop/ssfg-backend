@@ -210,7 +210,8 @@ async function addSquad(req, res) {
         type: 'competition',
         course_id: competition.course_id,
         date: competition.date,
-        status: 'in_progress',
+        // draft tant que la compétition n'est pas lancée → pas de live public
+        status: competition.launched_at ? 'in_progress' : 'draft',
         created_by: req.user.id,
         competition_id: competition.id,
       },
@@ -476,8 +477,28 @@ async function launchCompetition(req, res) {
         return res.status(403).json({ error: 'Super-admin uniquement' });
       }
       await competition.update({ launched_at: null });
+      // Remet en draft les squads sans scores (ceux en cours sans score)
+      const squads = await Round.findAll({
+        where: { competition_id: competition.id, status: 'in_progress' },
+        include: [
+          {
+            model: RoundPlayer,
+            as: 'players',
+            include: [{ model: HoleScore, as: 'holeScores' }],
+          },
+        ],
+      });
+      for (const s of squads) {
+        const hasScores = (s.players || []).some(
+          (rp) => (rp.holeScores || []).length > 0
+        );
+        if (!hasScores) {
+          await s.update({ status: 'draft' });
+        }
+      }
+      const refreshed = await Competition.findByPk(competition.id);
       return res.json({
-        competition,
+        competition: refreshed,
         message: 'Lancement annulé — composition modifiable à nouveau',
       });
     }
@@ -487,8 +508,19 @@ async function launchCompetition(req, res) {
       return res.status(400).json({ error: 'Aucun squad — composez avant de lancer' });
     }
     await competition.update({ launched_at: new Date() });
+    // Passe tous les squads draft → in_progress (live scoring)
+    await Round.update(
+      { status: 'in_progress' },
+      {
+        where: {
+          competition_id: competition.id,
+          status: 'draft',
+        },
+      }
+    );
+    const refreshed = await Competition.findByPk(competition.id);
     res.json({
-      competition,
+      competition: refreshed,
       message: 'Compétition lancée — live scoring actif, composition figée',
     });
   } catch (err) {
@@ -736,7 +768,7 @@ async function composeSquads(req, res) {
           type: 'competition',
           course_id: competition.course_id,
           date: competition.date,
-          status: 'in_progress',
+          status: competition.launched_at ? 'in_progress' : 'draft',
           created_by: req.user.id,
           competition_id: competition.id,
         },
