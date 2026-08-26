@@ -32,7 +32,21 @@ async function listRounds(req, res) {
         {
           model: RoundPlayer,
           as: 'players',
-          include: [{ model: User, as: 'user', attributes: ['id', 'first_name', 'last_name', 'index_value'] }],
+          include: [
+            {
+              model: User,
+              as: 'user',
+              attributes: ['id', 'first_name', 'last_name', 'index_value', 'club_id'],
+              include: [
+                {
+                  model: require('../models').Club,
+                  as: 'club',
+                  attributes: ['id', 'code', 'short_name'],
+                  required: false,
+                },
+              ],
+            },
+          ],
         },
       ],
       order: [['date', 'DESC'], ['created_at', 'DESC']],
