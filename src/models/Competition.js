@@ -40,6 +40,17 @@ const Competition = sequelize.define('Competition', {
     type: DataTypes.DATE,
     allowNull: true,
   },
+  /** club = un club | interclub = trophée multi-clubs | open = ouvert à tous */
+  scope_type: {
+    type: DataTypes.ENUM('club', 'interclub', 'open'),
+    allowNull: false,
+    defaultValue: 'open',
+  },
+  /** Renseigné si scope_type = club */
+  club_id: {
+    type: DataTypes.UUID,
+    allowNull: true,
+  },
 }, {
   tableName: 'competitions',
 });
