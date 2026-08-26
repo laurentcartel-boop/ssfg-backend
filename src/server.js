@@ -163,6 +163,12 @@ async function start() {
       );
       console.log('➕ accounting_entries.attachment_url');
     } catch (e) {}
+    try {
+      await sequelize.query(
+        'ALTER TABLE competitions ADD COLUMN launched_at DATETIME NULL'
+      );
+      console.log('➕ competitions.launched_at');
+    } catch (e) {}
 
     try {
       await sequelize.sync();
