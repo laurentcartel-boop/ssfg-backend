@@ -42,6 +42,15 @@ const MatchPlayChampionship = sequelize.define(
       type: DataTypes.DATE,
       allowNull: true,
     },
+    scope_type: {
+      type: DataTypes.ENUM('club', 'interclub', 'open'),
+      allowNull: false,
+      defaultValue: 'open',
+    },
+    club_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
   },
   { tableName: 'matchplay_championships' }
 );
