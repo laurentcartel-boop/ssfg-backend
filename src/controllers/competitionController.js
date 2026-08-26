@@ -5,6 +5,7 @@ const {
   HoleScore,
   Course,
   User,
+  Club,
   sequelize,
 } = require('../models');
 const { calculateIndexChange } = require('../services/indexService');
@@ -14,9 +15,11 @@ const { calculateIndexChange } = require('../services/indexService');
  */
 async function listCompetitions(req, res) {
   try {
-    const { status, year, limit = 50 } = req.query;
+    const { status, year, limit = 50, scope_type, club_id } = req.query;
     const where = {};
     if (status) where.status = status;
+    if (scope_type) where.scope_type = scope_type;
+    if (club_id) where.club_id = club_id;
     if (year) {
       const y = parseInt(year, 10);
       if (!Number.isNaN(y)) {
@@ -32,6 +35,12 @@ async function listCompetitions(req, res) {
       include: [
         { model: Course, as: 'course', attributes: ['id', 'name', 'short_name', 'par_total'] },
         { model: User, as: 'creator', attributes: ['id', 'first_name', 'last_name'] },
+        {
+          model: Club,
+          as: 'club',
+          attributes: ['id', 'code', 'short_name', 'name'],
+          required: false,
+        },
         {
           model: Round,
           as: 'squads',
@@ -153,9 +162,16 @@ async function getCompetition(req, res) {
  */
 async function createCompetition(req, res) {
   try {
-    const { name, course_id, date } = req.body;
+    const { name, course_id, date, scope_type = 'open', club_id = null } = req.body;
     if (!name || !course_id || !date) {
       return res.status(400).json({ error: 'name, course_id et date sont obligatoires' });
+    }
+
+    const scope = ['club', 'interclub', 'open'].includes(scope_type)
+      ? scope_type
+      : 'open';
+    if (scope === 'club' && !club_id) {
+      return res.status(400).json({ error: 'club_id obligatoire pour une compétition de club' });
     }
 
     const course = await Course.findByPk(course_id);
@@ -167,6 +183,8 @@ async function createCompetition(req, res) {
       date,
       status: 'open',
       created_by: req.user.id,
+      scope_type: scope,
+      club_id: scope === 'club' ? club_id : null,
     });
 
     res.status(201).json({ competition, message: 'Compétition créée' });
