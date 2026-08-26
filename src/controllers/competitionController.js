@@ -529,6 +529,83 @@ async function launchCompetition(req, res) {
   }
 }
 
+
+/**
+ * POST /api/competitions/:id/registrations
+ * Body: { user_ids: [], arrival_time? }
+ */
+async function addRegistrations(req, res) {
+  try {
+    const { CompetitionRegistration, User } = require('../models');
+    const competition = await Competition.findByPk(req.params.id);
+    if (!competition) return res.status(404).json({ error: 'Compétition non trouvée' });
+    if (competition.status === 'closed') {
+      return res.status(400).json({ error: 'Compétition clôturée' });
+    }
+    if (competition.launched_at) {
+      return res.status(400).json({ error: 'Compétition déjà lancée' });
+    }
+    const user_ids = req.body.user_ids || [];
+    if (!Array.isArray(user_ids) || user_ids.length === 0) {
+      return res.status(400).json({ error: 'user_ids requis' });
+    }
+    let arrival = req.body.arrival_time || null;
+    if (arrival) {
+      const m = String(arrival).match(/^(\d{1,2}):(\d{2})/);
+      arrival = m ? `${String(m[1]).padStart(2, '0')}:${m[2]}` : String(arrival).slice(0, 10);
+    }
+    let added = 0;
+    for (const uid of user_ids) {
+      const user = await User.findByPk(uid);
+      if (!user) continue;
+      const [, created] = await CompetitionRegistration.findOrCreate({
+        where: { competition_id: competition.id, user_id: uid },
+        defaults: {
+          competition_id: competition.id,
+          user_id: uid,
+          arrival_time: arrival,
+        },
+      });
+      if (created) added += 1;
+      else if (arrival) {
+        await CompetitionRegistration.update(
+          { arrival_time: arrival },
+          { where: { competition_id: competition.id, user_id: uid } }
+        );
+      }
+    }
+    req.params.id = competition.id;
+    return listRegistrations(req, res);
+  } catch (err) {
+    console.error('addRegistrations', err);
+    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+  }
+}
+
+/**
+ * DELETE /api/competitions/:id/registrations/:userId
+ */
+async function removeRegistration(req, res) {
+  try {
+    const { CompetitionRegistration } = require('../models');
+    const competition = await Competition.findByPk(req.params.id);
+    if (!competition) return res.status(404).json({ error: 'Compétition non trouvée' });
+    if (competition.launched_at) {
+      return res.status(400).json({ error: 'Compétition déjà lancée' });
+    }
+    await CompetitionRegistration.destroy({
+      where: {
+        competition_id: competition.id,
+        user_id: req.params.userId,
+      },
+    });
+    return listRegistrations(req, res);
+  } catch (err) {
+    console.error('removeRegistration', err);
+    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+  }
+}
+
 module.exports = {
   listCompetitions,
   getCompetition,
@@ -540,6 +617,8 @@ module.exports = {
   closeCompetition,
   deleteCompetition,
   listRegistrations,
+  addRegistrations,
+  removeRegistration,
   setForcedGroups,
   composeSquads,
 };
