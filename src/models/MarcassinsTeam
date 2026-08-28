@@ -45,6 +45,8 @@ const MarcassinsTeam = sequelize.define(
       allowNull: true,
       defaultValue: [],
     },
+    morning_round_id: { type: DataTypes.UUID, allowNull: true },
+    afternoon_round_id: { type: DataTypes.UUID, allowNull: true },
   },
   { tableName: 'marcassins_teams' }
 );
