@@ -13,9 +13,11 @@ const MatchPlayChampionship = require('./MatchPlayChampionship');
 const MatchPlayMatch = require('./MatchPlayMatch');
 let MarcassinsEdition = null;
 let MarcassinsTeam = null;
+let MarcassinsRegistration = null;
 try {
   MarcassinsEdition = require('./MarcassinsEdition');
   MarcassinsTeam = require('./MarcassinsTeam');
+  MarcassinsRegistration = require('./MarcassinsRegistration');
 } catch (e) {
   console.warn('⚠️ Modèles Marcassins absents:', e.message);
 }
@@ -103,6 +105,11 @@ if (MarcassinsEdition && MarcassinsTeam) {
   MarcassinsTeam.belongsTo(User, { foreignKey: 'player_a_id', as: 'playerA', constraints: false });
   MarcassinsTeam.belongsTo(User, { foreignKey: 'player_b_id', as: 'playerB', constraints: false });
 }
+if (MarcassinsEdition && MarcassinsRegistration) {
+  MarcassinsEdition.hasMany(MarcassinsRegistration, { foreignKey: 'edition_id', as: 'registrations' });
+  MarcassinsRegistration.belongsTo(MarcassinsEdition, { foreignKey: 'edition_id', as: 'edition' });
+  MarcassinsRegistration.belongsTo(User, { foreignKey: 'user_id', as: 'user', constraints: false });
+}
 
 User.belongsTo(Club, { foreignKey: 'club_id', as: 'club', constraints: false });
 
@@ -126,4 +133,5 @@ module.exports = {
   RoundExploit,
   MarcassinsEdition,
   MarcassinsTeam,
+  MarcassinsRegistration,
 };
