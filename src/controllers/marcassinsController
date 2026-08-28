@@ -47,11 +47,13 @@ function pairKey(a, b) {
   return [a, b].sort().join('|');
 }
 
-function sumHoles(arr) {
-  if (!Array.isArray(arr)) return null;
+function holesStat(arr) {
+  if (!Array.isArray(arr)) return { total: null, thru: 0 };
   const nums = arr.map((n) => Number(n)).filter((n) => n >= 1);
-  if (!nums.length) return null;
-  return nums.reduce((s, n) => s + n, 0);
+  return {
+    total: nums.length ? nums.reduce((s, n) => s + n, 0) : null,
+    thru: nums.length,
+  };
 }
 
 function teeCounts(tees, aId, bId) {
@@ -65,13 +67,22 @@ function teeCounts(tees, aId, bId) {
   return { a, b };
 }
 
-function serializeTeam(t, quota = 6) {
-  const morning = sumHoles(t.morning_holes);
-  const afternoon = sumHoles(t.afternoon_holes);
+function serializeTeam(t, quota = 6, parTotal = 71) {
+  const morning = holesStat(t.morning_holes);
+  const afternoon = holesStat(t.afternoon_holes);
+  const morningDone = morning.thru === 18;
+  const afternoonDone = afternoon.thru === 18;
   const total =
-    morning != null || afternoon != null
-      ? (morning || 0) + (afternoon || 0)
-      : null;
+    morningDone && afternoonDone
+      ? morning.total + afternoon.total
+      : morningDone || afternoonDone
+        ? (morningDone ? morning.total : 0) + (afternoonDone ? afternoon.total : 0)
+        : null;
+  const toPar = (strokes, thru) => {
+    if (!thru) return null;
+    const parUsed = thru === 18 ? parTotal : null;
+    return parUsed != null ? strokes - parUsed : null;
+  };
   const tees = teeCounts(t.afternoon_tees, t.player_a_id, t.player_b_id);
   return {
     id: t.id,
@@ -84,9 +95,21 @@ function serializeTeam(t, quota = 6) {
     morning_holes: t.morning_holes || [],
     afternoon_holes: t.afternoon_holes || [],
     afternoon_tees: t.afternoon_tees || [],
-    morning_total: morning,
-    afternoon_total: afternoon,
-    total,
+    morning_total: morningDone ? morning.total : null,
+    afternoon_total: afternoonDone ? afternoon.total : null,
+    morning_thru: morning.thru,
+    afternoon_thru: afternoon.thru,
+    morning_to_par: morningDone ? morning.total - parTotal : null,
+    afternoon_to_par: afternoonDone ? afternoon.total - parTotal : null,
+    total: morningDone || afternoonDone
+      ? (morningDone ? morning.total : 0) + (afternoonDone ? afternoon.total : 0)
+      : null,
+    to_par:
+      morningDone || afternoonDone
+        ? (morningDone ? morning.total - parTotal : 0) +
+          (afternoonDone ? afternoon.total - parTotal : 0)
+        : null,
+    par_total: parTotal,
     tee_a: tees.a,
     tee_b: tees.b,
     tee_ok: tees.a >= quota && tees.b >= quota,
@@ -244,7 +267,7 @@ async function getEdition(req, res) {
     });
 
     const teams = (edition.teams || [])
-      .map((t) => serializeTeam(t, edition.tee_quota))
+      .map((t) => serializeTeam(t, edition.tee_quota, edition.course?.par_total || 71))
       .sort((a, b) => {
         if (a.total == null && b.total == null) return 0;
         if (a.total == null) return 1;
@@ -428,7 +451,7 @@ async function updateScores(req, res) {
         { model: User, as: 'playerB', attributes: ['id', 'first_name', 'last_name'] },
       ],
     });
-    res.json({ team: serializeTeam(full, edition.tee_quota), hors_index: true });
+    res.json({ team: serializeTeam(full, edition.tee_quota, edition.course?.par_total || 71), hors_index: true });
   } catch (err) {
     console.error('updateScores marcassins', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -456,7 +479,7 @@ async function setStatus(req, res) {
       await edition.update({ status: 'live' });
     } else if (status === 'closed') {
       const ranked = (edition.teams || [])
-        .map((t) => serializeTeam(t, edition.tee_quota))
+        .map((t) => serializeTeam(t, edition.tee_quota, edition.course?.par_total || 71))
         .filter((t) => t.total != null)
         .sort((a, b) => a.total - b.total);
       const winnerId = ranked[0]?.id || null;
