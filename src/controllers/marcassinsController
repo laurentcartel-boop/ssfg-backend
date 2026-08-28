@@ -6,6 +6,43 @@ const {
   Course,
 } = require('../models');
 
+async function betterBallHoles(roundId) {
+  const { HoleScore, RoundPlayer } = require('../models');
+  if (!roundId) return null;
+  const rps = await RoundPlayer.findAll({ where: { round_id: roundId } });
+  if (!rps.length) return null;
+  const byHole = Array.from({ length: 18 }, () => []);
+  for (const rp of rps) {
+    const scores = await HoleScore.findAll({
+      where: { round_player_id: rp.id },
+    });
+    scores.forEach((hs) => {
+      const i = Number(hs.hole_number) - 1;
+      if (i >= 0 && i < 18 && hs.score != null) byHole[i].push(Number(hs.score));
+    });
+  }
+  const holes = byHole.map((arr) => (arr.length ? Math.min(...arr) : null));
+  if (!holes.some((n) => n != null)) return null;
+  return holes;
+}
+
+async function syncTeamFromLinkedRounds(team) {
+  const patch = {};
+  const m = await betterBallHoles(team.morning_round_id);
+  const a = await betterBallHoles(team.afternoon_round_id);
+  if (m) patch.morning_holes = m;
+  if (a) patch.afternoon_holes = a;
+  if (Object.keys(patch).length) await team.update(patch);
+  return patch;
+}
+
+async function syncEditionFromRounds(editionId) {
+  const teams = await MarcassinsTeam.findAll({ where: { edition_id: editionId } });
+  for (const team of teams) {
+    await syncTeamFromLinkedRounds(team);
+  }
+}
+
 function pairKey(a, b) {
   return [a, b].sort().join('|');
 }
@@ -190,6 +227,21 @@ async function getEdition(req, res) {
         }
       }
     }
+
+    await syncEditionFromRounds(edition.id);
+    edition = await MarcassinsEdition.findByPk(req.params.id, {
+      include: [
+        { model: Course, as: 'course' },
+        {
+          model: MarcassinsTeam,
+          as: 'teams',
+          include: [
+            { model: User, as: 'playerA', attributes: ['id', 'first_name', 'last_name', 'index_value'] },
+            { model: User, as: 'playerB', attributes: ['id', 'first_name', 'last_name', 'index_value'] },
+          ],
+        },
+      ],
+    });
 
     const teams = (edition.teams || [])
       .map((t) => serializeTeam(t, edition.tee_quota))
@@ -611,4 +663,6 @@ module.exports = {
   composePairsFromEdition,
   createLiveRoundsForEdition,
   ensureLiveRounds,
+  syncTeamFromLinkedRounds,
+  syncEditionFromRounds,
 };
