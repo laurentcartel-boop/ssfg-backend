@@ -114,6 +114,8 @@ router.get('/live', async (req, res) => {
             a: tm.playerA,
             b: tm.playerB,
             label: tm.label,
+            morning_round_id: tm.morning_round_id,
+            afternoon_round_id: tm.afternoon_round_id,
           })),
         }));
       }
