@@ -11,6 +11,8 @@ const CompetitionRegistration = require('./CompetitionRegistration');
 const Article = require('./Article');
 const MatchPlayChampionship = require('./MatchPlayChampionship');
 const MatchPlayMatch = require('./MatchPlayMatch');
+const MarcassinsEdition = require('./MarcassinsEdition');
+const MarcassinsTeam = require('./MarcassinsTeam');
 const AccountingEntry = require('./AccountingEntry');
 const Invoice = require('./Invoice');
 const RoundComment = require('./RoundComment');
@@ -85,6 +87,15 @@ RoundExploit.belongsTo(User, { foreignKey: 'created_by', as: 'creator', constrai
 
 
 Club.hasMany(User, { foreignKey: 'club_id', as: 'players', constraints: false });
+
+MarcassinsEdition.belongsTo(Course, { foreignKey: 'course_id', as: 'course', constraints: false });
+MarcassinsEdition.belongsTo(User, { foreignKey: 'created_by', as: 'creator', constraints: false });
+MarcassinsEdition.hasMany(MarcassinsTeam, { foreignKey: 'edition_id', as: 'teams' });
+MarcassinsEdition.belongsTo(MarcassinsTeam, { foreignKey: 'winner_team_id', as: 'winner', constraints: false });
+MarcassinsTeam.belongsTo(MarcassinsEdition, { foreignKey: 'edition_id', as: 'edition' });
+MarcassinsTeam.belongsTo(User, { foreignKey: 'player_a_id', as: 'playerA', constraints: false });
+MarcassinsTeam.belongsTo(User, { foreignKey: 'player_b_id', as: 'playerB', constraints: false });
+
 User.belongsTo(Club, { foreignKey: 'club_id', as: 'club', constraints: false });
 
 module.exports = {
@@ -105,4 +116,6 @@ module.exports = {
   Invoice,
   RoundComment,
   RoundExploit,
+  MarcassinsEdition,
+  MarcassinsTeam,
 };
