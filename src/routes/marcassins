@@ -1,0 +1,18 @@
+const express = require('express');
+const router = express.Router();
+const ctrl = require('../controllers/marcassinsController');
+const { authenticate, requireRole } = require('../middleware/auth');
+
+router.use(authenticate);
+
+router.get('/', ctrl.listEditions);
+router.get('/:id', ctrl.getEdition);
+router.post('/', requireRole('admin', 'super_admin'), ctrl.createEdition);
+router.post('/:id/teams', requireRole('admin', 'super_admin'), ctrl.addTeam);
+router.delete('/:id/teams/:teamId', requireRole('admin', 'super_admin'), ctrl.removeTeam);
+router.post('/:id/draw', requireRole('admin', 'super_admin'), ctrl.drawTeams);
+router.patch('/:id/teams/:teamId', requireRole('admin', 'super_admin'), ctrl.updateScores);
+router.post('/:id/status', requireRole('admin', 'super_admin'), ctrl.setStatus);
+router.delete('/:id', requireRole('super_admin'), ctrl.deleteEdition);
+
+module.exports = router;
