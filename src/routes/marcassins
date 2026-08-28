@@ -14,5 +14,9 @@ router.post('/:id/draw', requireRole('admin', 'super_admin'), ctrl.drawTeams);
 router.patch('/:id/teams/:teamId', requireRole('admin', 'super_admin'), ctrl.updateScores);
 router.post('/:id/status', requireRole('admin', 'super_admin'), ctrl.setStatus);
 router.delete('/:id', requireRole('super_admin'), ctrl.deleteEdition);
+router.get('/:id/registrations', ctrl.listRegistrations);
+router.post('/:id/registrations', requireRole('admin', 'super_admin'), ctrl.addRegistrations);
+router.post('/:id/forced-pairs', requireRole('admin', 'super_admin'), ctrl.setForcedPairs);
+router.post('/:id/compose-pairs', requireRole('admin', 'super_admin'), ctrl.composePairs);
 
 module.exports = router;
