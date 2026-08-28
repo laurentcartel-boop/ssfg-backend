@@ -85,11 +85,52 @@ router.get('/live', async (req, res) => {
         players_count: (r.players || []).length,
       }));
 
+    let marcassins = [];
+    try {
+      const { MarcassinsEdition, MarcassinsTeam, User } = require('../models');
+      if (MarcassinsEdition) {
+        const eds = await MarcassinsEdition.findAll({
+          where: { status: 'live' },
+          include: [
+            {
+              model: MarcassinsTeam,
+              as: 'teams',
+              include: [
+                { model: User, as: 'playerA', attributes: ['id', 'first_name', 'last_name'] },
+                { model: User, as: 'playerB', attributes: ['id', 'first_name', 'last_name'] },
+              ],
+            },
+          ],
+          order: [['year', 'DESC']],
+        });
+        marcassins = eds.map((e) => ({
+          id: e.id,
+          name: e.name,
+          year: e.year,
+          date: e.date,
+          teams_count: (e.teams || []).length,
+          teams: (e.teams || []).map((tm) => ({
+            id: tm.id,
+            a: tm.playerA,
+            b: tm.playerB,
+            label: tm.label,
+          })),
+        }));
+      }
+    } catch (e) {
+      console.warn('public live marcassins', e.message);
+    }
+
     res.json({
-      has_live: liveRounds.length > 0 || liveComps.length > 0 || liveSquads.length > 0,
+      has_live:
+        liveRounds.length > 0 ||
+        liveComps.length > 0 ||
+        liveSquads.length > 0 ||
+        marcassins.length > 0,
       rounds: liveRounds,
       competition_squads: liveSquads,
       competitions: liveComps,
+      marcassins,
     });
   } catch (err) {
     console.error('public live error:', err);
