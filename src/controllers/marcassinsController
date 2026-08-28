@@ -1,0 +1,357 @@
+const { Op } = require('sequelize');
+const {
+  MarcassinsEdition,
+  MarcassinsTeam,
+  User,
+  Course,
+} = require('../models');
+
+function pairKey(a, b) {
+  return [a, b].sort().join('|');
+}
+
+function sumHoles(arr) {
+  if (!Array.isArray(arr)) return null;
+  const nums = arr.map((n) => Number(n)).filter((n) => n >= 1);
+  if (!nums.length) return null;
+  return nums.reduce((s, n) => s + n, 0);
+}
+
+function teeCounts(tees, aId, bId) {
+  const list = Array.isArray(tees) ? tees : [];
+  let a = 0;
+  let b = 0;
+  list.forEach((id) => {
+    if (id === aId) a += 1;
+    else if (id === bId) b += 1;
+  });
+  return { a, b };
+}
+
+function serializeTeam(t, quota = 6) {
+  const morning = sumHoles(t.morning_holes);
+  const afternoon = sumHoles(t.afternoon_holes);
+  const total =
+    morning != null || afternoon != null
+      ? (morning || 0) + (afternoon || 0)
+      : null;
+  const tees = teeCounts(t.afternoon_tees, t.player_a_id, t.player_b_id);
+  return {
+    id: t.id,
+    label: t.label,
+    is_defending: t.is_defending,
+    player_a: t.playerA,
+    player_b: t.playerB,
+    player_a_id: t.player_a_id,
+    player_b_id: t.player_b_id,
+    morning_holes: t.morning_holes || [],
+    afternoon_holes: t.afternoon_holes || [],
+    afternoon_tees: t.afternoon_tees || [],
+    morning_total: morning,
+    afternoon_total: afternoon,
+    total,
+    tee_a: tees.a,
+    tee_b: tees.b,
+    tee_ok: tees.a >= quota && tees.b >= quota,
+  };
+}
+
+async function eligibleDefendingPair(year) {
+  const prev = await MarcassinsEdition.findOne({
+    where: { year: year - 1, status: 'closed' },
+    include: [{ model: MarcassinsTeam, as: 'winner' }],
+  });
+  if (!prev || !prev.winner) return null;
+  // S'ils défendaient déjà l'an passé, plus le droit cette année
+  if (prev.winner.is_defending) return null;
+  return {
+    player_a_id: prev.winner.player_a_id,
+    player_b_id: prev.winner.player_b_id,
+    edition_year: prev.year,
+  };
+}
+
+async function listEditions(req, res) {
+  try {
+    const editions = await MarcassinsEdition.findAll({
+      include: [
+        { model: Course, as: 'course', attributes: ['id', 'name', 'short_name'] },
+        {
+          model: MarcassinsTeam,
+          as: 'winner',
+          include: [
+            { model: User, as: 'playerA', attributes: ['id', 'first_name', 'last_name'] },
+            { model: User, as: 'playerB', attributes: ['id', 'first_name', 'last_name'] },
+          ],
+        },
+      ],
+      order: [['year', 'DESC']],
+    });
+    res.json({ editions, index_counts: false });
+  } catch (err) {
+    console.error('listEditions marcassins', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function getEdition(req, res) {
+  try {
+    const edition = await MarcassinsEdition.findByPk(req.params.id, {
+      include: [
+        { model: Course, as: 'course' },
+        {
+          model: MarcassinsTeam,
+          as: 'teams',
+          include: [
+            { model: User, as: 'playerA', attributes: ['id', 'first_name', 'last_name', 'index_value'] },
+            { model: User, as: 'playerB', attributes: ['id', 'first_name', 'last_name', 'index_value'] },
+          ],
+        },
+      ],
+    });
+    if (!edition) return res.status(404).json({ error: 'Édition introuvable' });
+
+    const teams = (edition.teams || [])
+      .map((t) => serializeTeam(t, edition.tee_quota))
+      .sort((a, b) => {
+        if (a.total == null && b.total == null) return 0;
+        if (a.total == null) return 1;
+        if (b.total == null) return -1;
+        return a.total - b.total;
+      });
+
+    const defending = await eligibleDefendingPair(edition.year);
+    res.json({
+      edition,
+      teams,
+      defending_eligible: defending,
+      hors_index: true,
+    });
+  } catch (err) {
+    console.error('getEdition marcassins', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function createEdition(req, res) {
+  try {
+    const year = Number(req.body.year) || new Date().getFullYear();
+    const date = req.body.date || `${year}-01-01`;
+    const existing = await MarcassinsEdition.findOne({ where: { year } });
+    if (existing) {
+      return res.status(409).json({ error: `Édition ${year} déjà créée` });
+    }
+    const edition = await MarcassinsEdition.create({
+      name: req.body.name || 'Trophée des Marcassins',
+      year,
+      date,
+      course_id: req.body.course_id || null,
+      tee_quota: Number(req.body.tee_quota) || 6,
+      status: 'setup',
+      created_by: req.user.id,
+    });
+
+    const def = await eligibleDefendingPair(year);
+    if (def) {
+      await MarcassinsTeam.create({
+        edition_id: edition.id,
+        player_a_id: def.player_a_id,
+        player_b_id: def.player_b_id,
+        is_defending: true,
+        label: 'Tenants du titre',
+      });
+    }
+    res.status(201).json({ edition, defending: def, message: 'Édition créée (hors index)' });
+  } catch (err) {
+    console.error('createEdition marcassins', err);
+    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+  }
+}
+
+async function addTeam(req, res) {
+  try {
+    const edition = await MarcassinsEdition.findByPk(req.params.id);
+    if (!edition) return res.status(404).json({ error: 'Édition introuvable' });
+    if (edition.status === 'closed') {
+      return res.status(400).json({ error: 'Édition clôturée' });
+    }
+    const { player_a_id, player_b_id, label, is_defending } = req.body;
+    if (!player_a_id || !player_b_id || player_a_id === player_b_id) {
+      return res.status(400).json({ error: 'Deux joueurs distincts requis' });
+    }
+    const teams = await MarcassinsTeam.findAll({ where: { edition_id: edition.id } });
+    const used = new Set();
+    teams.forEach((t) => {
+      used.add(t.player_a_id);
+      used.add(t.player_b_id);
+    });
+    if (used.has(player_a_id) || used.has(player_b_id)) {
+      return res.status(400).json({ error: 'Un des joueurs est déjà dans un duo' });
+    }
+    const team = await MarcassinsTeam.create({
+      edition_id: edition.id,
+      player_a_id,
+      player_b_id,
+      label: label || null,
+      is_defending: !!is_defending,
+    });
+    res.status(201).json({ team, message: 'Duo ajouté' });
+  } catch (err) {
+    console.error('addTeam marcassins', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function removeTeam(req, res) {
+  try {
+    const edition = await MarcassinsEdition.findByPk(req.params.id);
+    if (!edition || edition.status === 'closed') {
+      return res.status(400).json({ error: 'Impossible' });
+    }
+    await MarcassinsTeam.destroy({
+      where: { id: req.params.teamId, edition_id: edition.id },
+    });
+    res.json({ message: 'Duo retiré' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+/** Body: { pairs: [{ player_a_id, player_b_id, label? }] } ou { player_ids: [] } pour tirage */
+async function drawTeams(req, res) {
+  try {
+    const edition = await MarcassinsEdition.findByPk(req.params.id, {
+      include: [{ model: MarcassinsTeam, as: 'teams' }],
+    });
+    if (!edition) return res.status(404).json({ error: 'Édition introuvable' });
+    if (edition.status === 'closed') {
+      return res.status(400).json({ error: 'Édition clôturée' });
+    }
+
+    if (Array.isArray(req.body.pairs) && req.body.pairs.length) {
+      for (const p of req.body.pairs) {
+        await addTeam(
+          { ...req, body: p, params: { id: edition.id } },
+          { status() { return this; }, json() {}, statusCode: 200 }
+        );
+      }
+    }
+
+    const ids = req.body.player_ids || [];
+    if (ids.length) {
+      const used = new Set();
+      (edition.teams || []).forEach((t) => {
+        used.add(t.player_a_id);
+        used.add(t.player_b_id);
+      });
+      const pool = ids.filter((id) => !used.has(id));
+      for (let i = pool.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+      }
+      const leftover = [];
+      for (let i = 0; i + 1 < pool.length; i += 2) {
+        await MarcassinsTeam.create({
+          edition_id: edition.id,
+          player_a_id: pool[i],
+          player_b_id: pool[i + 1],
+          is_defending: false,
+        });
+      }
+      if (pool.length % 2 === 1) leftover.push(pool[pool.length - 1]);
+      return res.json({
+        message: 'Tirage effectué',
+        leftover,
+      });
+    }
+    res.json({ message: 'Rien à tirer' });
+  } catch (err) {
+    console.error('drawTeams', err);
+    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+  }
+}
+
+async function updateScores(req, res) {
+  try {
+    const edition = await MarcassinsEdition.findByPk(req.params.id);
+    if (!edition) return res.status(404).json({ error: 'Édition introuvable' });
+    if (edition.status === 'closed') {
+      return res.status(400).json({ error: 'Édition clôturée' });
+    }
+    const team = await MarcassinsTeam.findOne({
+      where: { id: req.params.teamId, edition_id: edition.id },
+    });
+    if (!team) return res.status(404).json({ error: 'Duo introuvable' });
+
+    const patch = {};
+    if (Array.isArray(req.body.morning_holes)) patch.morning_holes = req.body.morning_holes;
+    if (Array.isArray(req.body.afternoon_holes)) patch.afternoon_holes = req.body.afternoon_holes;
+    if (Array.isArray(req.body.afternoon_tees)) patch.afternoon_tees = req.body.afternoon_tees;
+    if (req.body.label !== undefined) patch.label = req.body.label;
+    await team.update(patch);
+    const full = await MarcassinsTeam.findByPk(team.id, {
+      include: [
+        { model: User, as: 'playerA', attributes: ['id', 'first_name', 'last_name'] },
+        { model: User, as: 'playerB', attributes: ['id', 'first_name', 'last_name'] },
+      ],
+    });
+    res.json({ team: serializeTeam(full, edition.tee_quota), hors_index: true });
+  } catch (err) {
+    console.error('updateScores marcassins', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function setStatus(req, res) {
+  try {
+    const edition = await MarcassinsEdition.findByPk(req.params.id, {
+      include: [{ model: MarcassinsTeam, as: 'teams' }],
+    });
+    if (!edition) return res.status(404).json({ error: 'Édition introuvable' });
+    const status = req.body.status;
+    if (!['setup', 'live', 'closed'].includes(status)) {
+      return res.status(400).json({ error: 'Statut invalide' });
+    }
+
+    if (status === 'closed') {
+      const ranked = (edition.teams || [])
+        .map((t) => serializeTeam(t, edition.tee_quota))
+        .filter((t) => t.total != null)
+        .sort((a, b) => a.total - b.total);
+      const winnerId = ranked[0]?.id || null;
+      await edition.update({ status: 'closed', winner_team_id: winnerId });
+    } else {
+      await edition.update({ status });
+    }
+    res.json({ edition, message: `Statut : ${status}` });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function deleteEdition(req, res) {
+  try {
+    const edition = await MarcassinsEdition.findByPk(req.params.id);
+    if (!edition) return res.status(404).json({ error: 'Introuvable' });
+    await MarcassinsTeam.destroy({ where: { edition_id: edition.id } });
+    await edition.destroy();
+    res.json({ message: 'Édition supprimée' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+module.exports = {
+  listEditions,
+  getEdition,
+  createEdition,
+  addTeam,
+  removeTeam,
+  drawTeams,
+  updateScores,
+  setStatus,
+  deleteEdition,
+};
