@@ -215,10 +215,13 @@ async function importHelloAsso(req, res) {
       course_id,
       date,
       competition_id,
+      marcassins_id,
+      target,
       dry_run = false,
       rows: rawRows = [],
       file_base64,
     } = req.body;
+    const isMarcassins = target === 'marcassins' || !!marcassins_id;
 
     if ((!Array.isArray(rawRows) || rawRows.length === 0) && file_base64) {
       try {
@@ -241,7 +244,7 @@ async function importHelloAsso(req, res) {
     if (!Array.isArray(rawRows) || rawRows.length === 0) {
       return res.status(400).json({ error: 'Aucune ligne à importer' });
     }
-    if (!dry_run) {
+    if (!dry_run && !isMarcassins) {
       if (!name || !course_id || !date) {
         return res.status(400).json({
           error: 'name, course_id et date obligatoires (sauf dry_run)',
@@ -249,6 +252,9 @@ async function importHelloAsso(req, res) {
       }
       const course = await Course.findByPk(course_id);
       if (!course) return res.status(404).json({ error: 'Parcours non trouvé' });
+    }
+    if (!dry_run && isMarcassins && !marcassins_id) {
+      return res.status(400).json({ error: 'marcassins_id requis pour l’import Marcassins' });
     }
 
     const clubs = await Club.findAll();
@@ -421,6 +427,41 @@ async function importHelloAsso(req, res) {
         email: user.email,
       });
       p.user_id = user.id;
+    }
+
+    if (isMarcassins && !dry_run) {
+      const { MarcassinsEdition, MarcassinsRegistration } = require('../models');
+      if (!MarcassinsEdition || !MarcassinsRegistration) {
+        return res.status(500).json({ error: 'Module Marcassins non chargé' });
+      }
+      const edition = await MarcassinsEdition.findByPk(marcassins_id);
+      if (!edition) return res.status(404).json({ error: 'Édition Marcassins introuvable' });
+      let registered = 0;
+      for (const p of preview) {
+        const uid = p.user_id;
+        if (!uid) continue;
+        const [reg, wasCreated] = await MarcassinsRegistration.findOrCreate({
+          where: { edition_id: edition.id, user_id: uid },
+          defaults: {
+            edition_id: edition.id,
+            user_id: uid,
+            ticket: p.ticket || null,
+          },
+        });
+        if (!wasCreated && p.ticket) await reg.update({ ticket: p.ticket });
+        registered += 1;
+      }
+      return res.status(201).json({
+        message: 'Import HelloAsso Marcassins terminé',
+        edition: { id: edition.id, year: edition.year, name: edition.name },
+        created_count: created.length,
+        existing_count: linked.length,
+        registered_count: registered,
+        created,
+        existing: linked,
+        temp_password: tempPassword,
+        hint: 'Inscrits visibles dans l’édition. Duos forcés puis tirage.',
+      });
     }
 
     let competition = null;
