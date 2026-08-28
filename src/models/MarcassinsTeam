@@ -1,0 +1,52 @@
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
+
+const MarcassinsTeam = sequelize.define(
+  'MarcassinsTeam',
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    edition_id: {
+      type: DataTypes.UUID,
+      allowNull: false,
+    },
+    player_a_id: {
+      type: DataTypes.UUID,
+      allowNull: false,
+    },
+    player_b_id: {
+      type: DataTypes.UUID,
+      allowNull: false,
+    },
+    label: {
+      type: DataTypes.STRING(80),
+      allowNull: true,
+    },
+    is_defending: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+    morning_holes: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: [],
+    },
+    afternoon_holes: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: [],
+    },
+    afternoon_tees: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: [],
+    },
+  },
+  { tableName: 'marcassins_teams' }
+);
+
+module.exports = MarcassinsTeam;
