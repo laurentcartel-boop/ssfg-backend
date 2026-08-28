@@ -475,6 +475,22 @@ async function closeRound(req, res) {
 
     await t.commit();
 
+    try {
+      const { MarcassinsTeam } = require('../models');
+      const { syncTeamFromLinkedRounds } = require('./marcassinsController');
+      const team = await MarcassinsTeam.findOne({
+        where: {
+          [Op.or]: [
+            { morning_round_id: round.id },
+            { afternoon_round_id: round.id },
+          ],
+        },
+      });
+      if (team && syncTeamFromLinkedRounds) await syncTeamFromLinkedRounds(team);
+    } catch (e) {
+      console.warn('sync marcassins after close', e.message);
+    }
+
     res.json({
       message: round.type === 'entrainement' ? 'Entraînement clôturé (hors index)' : 'Partie clôturée – index mis à jour',
       results: updates,
