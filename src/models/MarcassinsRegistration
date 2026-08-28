@@ -1,0 +1,37 @@
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
+
+const MarcassinsRegistration = sequelize.define(
+  'MarcassinsRegistration',
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    edition_id: {
+      type: DataTypes.UUID,
+      allowNull: false,
+    },
+    user_id: {
+      type: DataTypes.UUID,
+      allowNull: false,
+    },
+    ticket: {
+      type: DataTypes.STRING(40),
+      allowNull: true,
+    },
+    forced_pair: {
+      type: DataTypes.STRING(40),
+      allowNull: true,
+    },
+  },
+  {
+    tableName: 'marcassins_registrations',
+    indexes: [
+      { unique: true, fields: ['edition_id', 'user_id'] },
+    ],
+  }
+);
+
+module.exports = MarcassinsRegistration;
