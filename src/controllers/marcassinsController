@@ -84,7 +84,13 @@ async function createLiveRoundsForEdition(edition, userId) {
     ],
   });
   const today = new Date().toISOString().slice(0, 10);
-  const courseId = edition.course_id;
+  let courseId = edition.course_id;
+  if (!courseId) {
+    const { Course } = require('../models');
+    const c0 = await Course.findOne({ where: { is_active: true } });
+    courseId = c0 ? c0.id : null;
+  }
+  if (!courseId) throw new Error('Aucun parcours pour créer les parties live');
   let created = 0;
   for (const team of teams) {
     if (team.morning_round_id && team.afternoon_round_id) continue;
@@ -144,7 +150,7 @@ async function listEditions(req, res) {
 
 async function getEdition(req, res) {
   try {
-    const edition = await MarcassinsEdition.findByPk(req.params.id, {
+    let edition = await MarcassinsEdition.findByPk(req.params.id, {
       include: [
         { model: Course, as: 'course' },
         {
@@ -158,6 +164,32 @@ async function getEdition(req, res) {
       ],
     });
     if (!edition) return res.status(404).json({ error: 'Édition introuvable' });
+
+    if (edition.status === 'live') {
+      const missing = (edition.teams || []).some(
+        (tm) => !tm.morning_round_id || !tm.afternoon_round_id
+      );
+      if (missing) {
+        try {
+          await createLiveRoundsForEdition(edition, req.user?.id || edition.created_by);
+          edition = await MarcassinsEdition.findByPk(req.params.id, {
+            include: [
+              { model: Course, as: 'course' },
+              {
+                model: MarcassinsTeam,
+                as: 'teams',
+                include: [
+                  { model: User, as: 'playerA', attributes: ['id', 'first_name', 'last_name', 'index_value'] },
+                  { model: User, as: 'playerB', attributes: ['id', 'first_name', 'last_name', 'index_value'] },
+                ],
+              },
+            ],
+          });
+        } catch (e) {
+          console.warn('auto live rounds', e.message);
+        }
+      }
+    }
 
     const teams = (edition.teams || [])
       .map((t) => serializeTeam(t, edition.tee_quota))
