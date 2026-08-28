@@ -53,6 +53,8 @@ function serializeTeam(t, quota = 6) {
     tee_a: tees.a,
     tee_b: tees.b,
     tee_ok: tees.a >= quota && tees.b >= quota,
+    morning_round_id: t.morning_round_id,
+    afternoon_round_id: t.afternoon_round_id,
   };
 }
 
@@ -69,6 +71,52 @@ async function eligibleDefendingPair(year) {
     player_b_id: prev.winner.player_b_id,
     edition_year: prev.year,
   };
+}
+
+
+async function createLiveRoundsForEdition(edition, userId) {
+  const { Round, RoundPlayer, User } = require('../models');
+  const teams = await MarcassinsTeam.findAll({
+    where: { edition_id: edition.id },
+    include: [
+      { model: User, as: 'playerA' },
+      { model: User, as: 'playerB' },
+    ],
+  });
+  const today = new Date().toISOString().slice(0, 10);
+  const courseId = edition.course_id;
+  let created = 0;
+  for (const team of teams) {
+    if (team.morning_round_id && team.afternoon_round_id) continue;
+    const a = team.playerA;
+    const b = team.playerB;
+    const duo = `${(a && a.last_name) || '?'} / ${(b && b.last_name) || '?'}`;
+    async function makeRound(label) {
+      const round = await Round.create({
+        name: `Marcassins ${edition.year} · ${label} · ${duo}`,
+        type: 'entrainement',
+        course_id: courseId,
+        date: today,
+        status: 'in_progress',
+        created_by: userId,
+      });
+      for (const uid of [team.player_a_id, team.player_b_id]) {
+        const u = await User.findByPk(uid);
+        await RoundPlayer.create({
+          round_id: round.id,
+          user_id: uid,
+          starting_index: u ? u.index_value : 1,
+        });
+      }
+      return round.id;
+    }
+    const patch = {};
+    if (!team.morning_round_id) patch.morning_round_id = await makeRound('Matin');
+    if (!team.afternoon_round_id) patch.afternoon_round_id = await makeRound('AM');
+    await team.update(patch);
+    created += 1;
+  }
+  return created;
 }
 
 async function listEditions(req, res) {
@@ -319,6 +367,8 @@ async function setStatus(req, res) {
       if (n === 0) {
         await composePairsFromEdition(edition.id);
       }
+      const fresh = await MarcassinsEdition.findByPk(edition.id);
+      await createLiveRoundsForEdition(fresh || edition, req.user.id);
       await edition.update({ status: 'live' });
     } else if (status === 'closed') {
       const ranked = (edition.teams || [])
@@ -499,6 +549,19 @@ async function composePairs(req, res) {
   }
 }
 
+async function ensureLiveRounds(req, res) {
+  try {
+    const edition = await MarcassinsEdition.findByPk(req.params.id);
+    if (!edition) return res.status(404).json({ error: 'Introuvable' });
+    const n = await createLiveRoundsForEdition(edition, req.user.id);
+    res.json({ message: `${n} duo(s) → parties live créées (hors index)`, created: n });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+  }
+}
+
+
 module.exports = {
   listEditions,
   getEdition,
@@ -514,4 +577,6 @@ module.exports = {
   setForcedPairs,
   composePairs,
   composePairsFromEdition,
+  createLiveRoundsForEdition,
+  ensureLiveRounds,
 };
