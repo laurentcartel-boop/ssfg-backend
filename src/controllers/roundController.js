@@ -50,7 +50,7 @@ async function listRounds(req, res) {
         },
       ],
       order: [['date', 'DESC'], ['created_at', 'DESC']],
-      limit: Math.min(parseInt(limit, 10) || 50, 100),
+      limit: Math.min(parseInt(limit, 10) || 100, 200),
     });
 
     res.json({ rounds });
