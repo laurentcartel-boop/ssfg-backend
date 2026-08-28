@@ -451,16 +451,31 @@ async function importHelloAsso(req, res) {
         if (!wasCreated && p.ticket) await reg.update({ ticket: p.ticket });
         registered += 1;
       }
+      // Compose auto les duos à partir de TOUS les inscrits (pas de cases à cocher)
+      let composed = 0;
+      let leftover = [];
+      try {
+        const { composePairsFromEdition } = require('./marcassinsController');
+        if (typeof composePairsFromEdition === 'function') {
+          const out = await composePairsFromEdition(edition.id);
+          composed = out.created || 0;
+          leftover = out.leftover || [];
+        }
+      } catch (e) {
+        console.warn('compose auto marcassins:', e.message);
+      }
       return res.status(201).json({
-        message: 'Import HelloAsso Marcassins terminé',
+        message: 'Import HelloAsso Marcassins terminé — joueurs à jour, duos composés',
         edition: { id: edition.id, year: edition.year, name: edition.name },
         created_count: created.length,
         existing_count: linked.length,
         registered_count: registered,
+        pairs_created: composed,
+        leftover,
         created,
         existing: linked,
         temp_password: tempPassword,
-        hint: 'Inscrits visibles dans l’édition. Duos forcés puis tirage.',
+        hint: 'Inscriptions closes côté HelloAsso. Ajustements de dernière minute en manuel.',
       });
     }
 
