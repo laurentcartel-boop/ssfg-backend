@@ -1,0 +1,58 @@
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
+
+const MarcassinsEdition = sequelize.define(
+  'MarcassinsEdition',
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    name: {
+      type: DataTypes.STRING(200),
+      allowNull: false,
+      defaultValue: 'Trophée des Marcassins',
+    },
+    year: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
+    date: {
+      type: DataTypes.DATEONLY,
+      allowNull: false,
+    },
+    course_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+    status: {
+      type: DataTypes.ENUM('setup', 'live', 'closed'),
+      allowNull: false,
+      defaultValue: 'setup',
+    },
+    tee_quota: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 6,
+    },
+    winner_team_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+    notes: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    created_by: {
+      type: DataTypes.UUID,
+      allowNull: false,
+    },
+  },
+  {
+    tableName: 'marcassins_editions',
+    indexes: [{ unique: true, fields: ['year'] }],
+  }
+);
+
+module.exports = MarcassinsEdition;
