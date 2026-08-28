@@ -344,6 +344,147 @@ async function deleteEdition(req, res) {
   }
 }
 
+
+async function listRegistrations(req, res) {
+  try {
+    const { MarcassinsRegistration } = require('../models');
+    const regs = await MarcassinsRegistration.findAll({
+      where: { edition_id: req.params.id },
+      include: [
+        {
+          model: User,
+          as: 'user',
+          attributes: ['id', 'first_name', 'last_name', 'email', 'index_value', 'club_id'],
+        },
+      ],
+      order: [['createdAt', 'ASC']],
+    });
+    res.json({ registrations: regs });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+  }
+}
+
+async function addRegistrations(req, res) {
+  try {
+    const { MarcassinsRegistration } = require('../models');
+    const edition = await MarcassinsEdition.findByPk(req.params.id);
+    if (!edition || edition.status === 'closed') {
+      return res.status(400).json({ error: 'Édition indisponible' });
+    }
+    const ids = req.body.user_ids || [];
+    for (const uid of ids) {
+      await MarcassinsRegistration.findOrCreate({
+        where: { edition_id: edition.id, user_id: uid },
+        defaults: { edition_id: edition.id, user_id: uid },
+      });
+    }
+    return listRegistrations(req, res);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function setForcedPairs(req, res) {
+  try {
+    const { MarcassinsRegistration } = require('../models');
+    const editionId = req.params.id;
+    const groups = req.body.groups || [];
+    if (req.body.clear_all) {
+      await MarcassinsRegistration.update(
+        { forced_pair: null },
+        { where: { edition_id: editionId } }
+      );
+    }
+    for (const g of groups) {
+      const label = String(g.label || '').trim();
+      const ids = g.user_ids || [];
+      if (!label || ids.length !== 2) continue;
+      await MarcassinsRegistration.update(
+        { forced_pair: label },
+        { where: { edition_id: editionId, user_id: ids } }
+      );
+    }
+    return listRegistrations(req, res);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+/** Crée les duos : forcés d'abord, puis tirage des inscrits restants */
+async function composePairs(req, res) {
+  try {
+    const { MarcassinsRegistration } = require('../models');
+    const edition = await MarcassinsEdition.findByPk(req.params.id);
+    if (!edition || edition.status === 'closed') {
+      return res.status(400).json({ error: 'Édition indisponible' });
+    }
+    const regs = await MarcassinsRegistration.findAll({
+      where: { edition_id: edition.id },
+    });
+    const existing = await MarcassinsTeam.findAll({ where: { edition_id: edition.id } });
+    const used = new Set();
+    existing.forEach((t) => {
+      used.add(t.player_a_id);
+      used.add(t.player_b_id);
+    });
+
+    const byPair = new Map();
+    const free = [];
+    for (const r of regs) {
+      if (used.has(r.user_id)) continue;
+      if (r.forced_pair) {
+        if (!byPair.has(r.forced_pair)) byPair.set(r.forced_pair, []);
+        byPair.get(r.forced_pair).push(r.user_id);
+      } else {
+        free.push(r.user_id);
+      }
+    }
+
+    let created = 0;
+    for (const [label, ids] of byPair) {
+      if (ids.length !== 2) continue;
+      await MarcassinsTeam.create({
+        edition_id: edition.id,
+        player_a_id: ids[0],
+        player_b_id: ids[1],
+        is_defending: false,
+        label: `Forcé ${label}`,
+      });
+      ids.forEach((id) => used.add(id));
+      created += 1;
+    }
+
+    const pool = free.filter((id) => !used.has(id));
+    for (let i = pool.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    const leftover = [];
+    for (let i = 0; i + 1 < pool.length; i += 2) {
+      await MarcassinsTeam.create({
+        edition_id: edition.id,
+        player_a_id: pool[i],
+        player_b_id: pool[i + 1],
+        is_defending: false,
+      });
+      created += 1;
+    }
+    if (pool.length % 2 === 1) leftover.push(pool[pool.length - 1]);
+
+    res.json({
+      message: `${created} duo(s) créé(s)`,
+      leftover,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+  }
+}
+
 module.exports = {
   listEditions,
   getEdition,
@@ -354,4 +495,8 @@ module.exports = {
   updateScores,
   setStatus,
   deleteEdition,
+  listRegistrations,
+  addRegistrations,
+  setForcedPairs,
+  composePairs,
 };
