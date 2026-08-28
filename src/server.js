@@ -212,6 +212,16 @@ async function start() {
     } catch (migErr) {
       console.warn('⚠️ migrateMatchPlay:', migErr.message || migErr);
     }
+    try {
+      await sequelize.query(
+        'ALTER TABLE marcassins_teams ADD COLUMN morning_round_id CHAR(36) NULL'
+      );
+    } catch (e) {}
+    try {
+      await sequelize.query(
+        'ALTER TABLE marcassins_teams ADD COLUMN afternoon_round_id CHAR(36) NULL'
+      );
+    } catch (e) {}
     console.log('✅ Tables synchronisées');
 
     app.listen(PORT, () => {
