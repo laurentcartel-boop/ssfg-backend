@@ -31,6 +31,7 @@ app.use('/api/articles', require('./routes/articles'));
 app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/accounting', require('./routes/accounting'));
 app.use('/api/matchplay', require('./routes/matchplay'));
+app.use('/api/marcassins', require('./routes/marcassins'));
 
 // Error handler
 app.use((err, req, res, next) => {
