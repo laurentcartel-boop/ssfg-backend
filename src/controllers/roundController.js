@@ -578,6 +578,59 @@ async function setPlayerDnf(req, res) {
 /**
  * DELETE /api/rounds/:id — super-admin : supprimer une partie (erreur / test)
  */
+const DELETE_REASONS = [
+  'test_appli',
+  'demo',
+  'illegal',
+  'fake_player_index',
+  'error_create',
+  'duplicate',
+  'other',
+];
+
+async function writeClubLog({ actor_id, action, entity_type, entity_id, reason, note, payload }) {
+  try {
+    const { ClubEventLog } = require('../models');
+    if (!ClubEventLog) return;
+    await ClubEventLog.create({
+      actor_id,
+      action,
+      entity_type,
+      entity_id: entity_id ? String(entity_id) : null,
+      reason: reason || null,
+      note: note || null,
+      payload: payload || null,
+    });
+  } catch (e) {
+    console.warn('club log', e.message);
+  }
+}
+
+async function setInvestigation(req, res) {
+  try {
+    const round = await Round.findByPk(req.params.id);
+    if (!round) return res.status(404).json({ error: 'Partie non trouvée' });
+    const on = Boolean(req.body.under_investigation);
+    const note = req.body.note ? String(req.body.note).slice(0, 255) : null;
+    await round.update({ under_investigation: on, investigation_note: on ? note : null });
+    await writeClubLog({
+      actor_id: req.user.id,
+      action: on ? 'investigate_on' : 'investigate_off',
+      entity_type: 'round',
+      entity_id: round.id,
+      note,
+      payload: { name: round.name, status: round.status },
+    });
+    res.json({
+      message: on ? 'Partie placée sous enquête' : 'Enquête levée',
+      under_investigation: on,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
 async function deleteRound(req, res) {
   const t = await sequelize.transaction();
   try {
@@ -589,13 +642,62 @@ async function deleteRound(req, res) {
       await t.rollback();
       return res.status(404).json({ error: 'Partie non trouvée' });
     }
+
+    const reason = String(req.body?.reason || req.query.reason || '').trim();
+    const note = String(req.body?.note || '').trim().slice(0, 500);
+    const pin = String(req.body?.password || req.body?.pin || '');
+    const expectedPin = process.env.DELETE_TEST_PIN || 'SSFG-TEST';
+    const testDelete = ['test_appli', 'demo'].includes(reason);
+
+    if (round.status === 'in_progress' && !testDelete) {
+      await t.rollback();
+      return res.status(403).json({
+        error:
+          'Partie en cours : suppression interdite. Place-la sous enquête, ou indique le motif test/démo + mot de passe.',
+      });
+    }
+    if (!DELETE_REASONS.includes(reason)) {
+      await t.rollback();
+      return res.status(400).json({
+        error: 'Motif obligatoire',
+        reasons: DELETE_REASONS,
+      });
+    }
+    if (testDelete && pin !== expectedPin) {
+      await t.rollback();
+      return res.status(403).json({ error: 'Mot de passe test / démo incorrect' });
+    }
+    if (round.status === 'closed' && !reason) {
+      await t.rollback();
+      return res.status(400).json({ error: 'Motif obligatoire pour une partie terminée' });
+    }
+
+    const snapshot = {
+      name: round.name,
+      type: round.type,
+      date: round.date,
+      status: round.status,
+      players: (round.players || []).length,
+    };
+
     for (const rp of round.players || []) {
       await HoleScore.destroy({ where: { round_player_id: rp.id }, transaction: t });
     }
     await RoundPlayer.destroy({ where: { round_id: round.id }, transaction: t });
     await round.destroy({ transaction: t });
     await t.commit();
-    res.json({ message: 'Partie supprimée' });
+
+    await writeClubLog({
+      actor_id: req.user.id,
+      action: 'round_delete',
+      entity_type: 'round',
+      entity_id: snapshot.name,
+      reason,
+      note,
+      payload: snapshot,
+    });
+
+    res.json({ message: 'Partie supprimée', reason });
   } catch (err) {
     await t.rollback();
     console.error('deleteRound', err);
@@ -935,6 +1037,8 @@ module.exports = {
   closeRound,
   setPlayerDnf,
   deleteRound,
+  setInvestigation,
+  writeClubLog,
   listComments,
   addComment,
   deleteComment,
