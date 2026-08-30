@@ -10,6 +10,7 @@ const Competition = require('./Competition');
 const CompetitionRegistration = require('./CompetitionRegistration');
 const Article = require('./Article');
 const ClubEventLog = require('./ClubEventLog');
+const ChatMessage = require('./ChatMessage');
 const ArticleLike = require('./ArticleLike');
 const ArticleComment = require('./ArticleComment');
 const MatchPlayChampionship = require('./MatchPlayChampionship');
@@ -121,6 +122,7 @@ ArticleLike.belongsTo(User, { foreignKey: 'user_id', as: 'user', constraints: fa
 ArticleComment.belongsTo(Article, { foreignKey: 'article_id', as: 'article', constraints: false });
 ArticleComment.belongsTo(User, { foreignKey: 'user_id', as: 'user', constraints: false });
 
+ChatMessage.belongsTo(User, { foreignKey: 'user_id', as: 'user', constraints: false });
 User.belongsTo(Club, { foreignKey: 'club_id', as: 'club', constraints: false });
 
 module.exports = {
@@ -136,6 +138,7 @@ module.exports = {
   CompetitionRegistration,
   Article,
   ClubEventLog,
+  ChatMessage,
   ArticleLike,
   ArticleComment,
   MatchPlayChampionship,
