@@ -9,6 +9,8 @@ const IndexHistory = require('./IndexHistory');
 const Competition = require('./Competition');
 const CompetitionRegistration = require('./CompetitionRegistration');
 const Article = require('./Article');
+const ArticleLike = require('./ArticleLike');
+const ArticleComment = require('./ArticleComment');
 const MatchPlayChampionship = require('./MatchPlayChampionship');
 const MatchPlayMatch = require('./MatchPlayMatch');
 let MarcassinsEdition = null;
@@ -111,6 +113,13 @@ if (MarcassinsEdition && MarcassinsRegistration) {
   MarcassinsRegistration.belongsTo(User, { foreignKey: 'user_id', as: 'user', constraints: false });
 }
 
+Article.hasMany(ArticleLike, { foreignKey: 'article_id', as: 'likes', constraints: false });
+Article.hasMany(ArticleComment, { foreignKey: 'article_id', as: 'comments', constraints: false });
+ArticleLike.belongsTo(Article, { foreignKey: 'article_id', as: 'article', constraints: false });
+ArticleLike.belongsTo(User, { foreignKey: 'user_id', as: 'user', constraints: false });
+ArticleComment.belongsTo(Article, { foreignKey: 'article_id', as: 'article', constraints: false });
+ArticleComment.belongsTo(User, { foreignKey: 'user_id', as: 'user', constraints: false });
+
 User.belongsTo(Club, { foreignKey: 'club_id', as: 'club', constraints: false });
 
 module.exports = {
@@ -125,6 +134,8 @@ module.exports = {
   Competition,
   CompetitionRegistration,
   Article,
+  ArticleLike,
+  ArticleComment,
   MatchPlayChampionship,
   MatchPlayMatch,
   AccountingEntry,
