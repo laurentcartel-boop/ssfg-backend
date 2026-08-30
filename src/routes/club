@@ -1,0 +1,10 @@
+const express = require('express');
+const router = express.Router();
+const { authenticate, requireRole } = require('../middleware/auth');
+const ctrl = require('../controllers/clubAdminController');
+
+router.use(authenticate);
+router.use(requireRole('super_admin'));
+router.get('/logs', ctrl.listLogs);
+
+module.exports = router;
