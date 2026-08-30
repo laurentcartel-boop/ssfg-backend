@@ -29,6 +29,7 @@ app.use('/api/import', require('./routes/import'));
 app.use('/api/competitions', require('./routes/competitions'));
 app.use('/api/articles', require('./routes/articles'));
 app.use('/api/club', require('./routes/club'));
+app.use('/api/chat', require('./routes/chat'));
 app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/accounting', require('./routes/accounting'));
 app.use('/api/matchplay', require('./routes/matchplay'));
