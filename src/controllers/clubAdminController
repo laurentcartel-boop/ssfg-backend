@@ -1,0 +1,35 @@
+const { ClubEventLog, User } = require('../models');
+
+async function listLogs(req, res) {
+  try {
+    const logs = await ClubEventLog.findAll({
+      order: [['createdAt', 'DESC']],
+      limit: 200,
+    });
+    const actors = await User.findAll({
+      where: { id: logs.map((l) => l.actor_id).filter(Boolean) },
+      attributes: ['id', 'first_name', 'last_name', 'email'],
+    });
+    const byId = Object.fromEntries(actors.map((u) => [u.id, u]));
+    res.json({
+      logs: logs.map((l) => ({
+        id: l.id,
+        action: l.action,
+        entity_type: l.entity_type,
+        entity_id: l.entity_id,
+        reason: l.reason,
+        note: l.note,
+        payload: l.payload,
+        created_at: l.createdAt,
+        actor: byId[l.actor_id]
+          ? `${byId[l.actor_id].first_name} ${byId[l.actor_id].last_name}`
+          : null,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+module.exports = { listLogs };
