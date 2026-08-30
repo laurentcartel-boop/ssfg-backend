@@ -206,10 +206,13 @@ async function getSeasonRanking(req, res) {
       for (const rp of round.players || []) {
         if (!rp.user || !rp.user.is_active) continue;
         if (rp.total_score == null) continue;
+        const brut = Number(rp.total_score);
+        const idx = Number(rp.starting_index != null ? rp.starting_index : rp.user.index_value) || 0;
         events.get(key).push({
           user_id: rp.user_id,
           user: rp.user,
-          brut: Number(rp.total_score),
+          brut,
+          net: Math.round((brut - idx) * 10) / 10,
         });
       }
     }
@@ -225,30 +228,46 @@ async function getSeasonRanking(req, res) {
         if (!prev || e.brut < prev.brut) bestByUser.set(e.user_id, e);
       }
       const list = Array.from(bestByUser.values());
-      // Classement brut : score le plus bas gagne
-      list.sort((a, b) => a.brut - b.brut);
 
-      list.forEach((e, idx) => {
-        const place = idx + 1;
-        const pts = pointsForPlace(place);
-        if (!byUser.has(e.user_id)) {
-          byUser.set(e.user_id, {
-            id: e.user_id,
-            first_name: e.user.first_name,
-            last_name: e.user.last_name,
-            index_value: Number(e.user.index_value),
-            series: getIndexSeries(e.user.index_value),
-            categories: getCategories(e.user),
-            competitions_played: 0,
-            points: 0,
-            results: [],
+      const award = (sorted, fieldPts, fieldPlace) => {
+        sorted.forEach((e, idx) => {
+          const place = idx + 1;
+          const pts = pointsForPlace(place);
+          if (!byUser.has(e.user_id)) {
+            byUser.set(e.user_id, {
+              id: e.user_id,
+              first_name: e.user.first_name,
+              last_name: e.user.last_name,
+              index_value: Number(e.user.index_value),
+              series: getIndexSeries(e.user.index_value),
+              categories: getCategories(e.user),
+              competitions_played: 0,
+              points: 0,
+              points_net: 0,
+              results: [],
+            });
+          }
+          const row = byUser.get(e.user_id);
+          row[fieldPts] += pts;
+          row.results.push({
+            place,
+            points: pts,
+            brut: e.brut,
+            net: e.net,
+            mode: fieldPts,
           });
+        });
+      };
+
+      const brutList = [...list].sort((a, b) => a.brut - b.brut);
+      const netList = [...list].sort((a, b) => a.net - b.net);
+      award(brutList, 'points', 'place');
+      award(netList, 'points_net', 'place_net');
+      for (const e of list) {
+        if (byUser.has(e.user_id)) {
+          byUser.get(e.user_id).competitions_played += 1;
         }
-        const row = byUser.get(e.user_id);
-        row.competitions_played += 1;
-        row.points += pts;
-        row.results.push({ place, points: pts, brut: e.brut });
-      });
+      }
     }
 
     let ranking = Array.from(byUser.values());
@@ -257,8 +276,11 @@ async function getSeasonRanking(req, res) {
       ranking = ranking.filter((r) => r.categories.includes(category));
     }
 
+    const sortNet = String(req.query.sort || '') === 'net';
     ranking.sort((a, b) => {
-      if (b.points !== a.points) return b.points - a.points;
+      const pa = sortNet ? a.points_net : a.points;
+      const pb = sortNet ? b.points_net : b.points;
+      if (pb !== pa) return pb - pa;
       if (a.competitions_played !== b.competitions_played) {
         return b.competitions_played - a.competitions_played;
       }
@@ -274,7 +296,9 @@ async function getSeasonRanking(req, res) {
       series: r.series,
       categories: r.categories,
       competitions_played: r.competitions_played,
-      points: r.points,
+      points: sortNet ? r.points_net : r.points,
+      points_brut: r.points,
+      points_net: r.points_net,
     }));
 
     res.json({
@@ -289,7 +313,7 @@ async function getSeasonRanking(req, res) {
         step: -5,
         minimum: 5,
         description:
-          '1er = 150 pts, 2e = 145, ... minimum 5 pts. Classement par score brut de chaque compétition.',
+          '1er = 150 pts, 2e = 145, ... minimum 5 pts. Brut = coups joués. Net = brut − index du jour.',
       },
     });
   } catch (err) {
