@@ -4,9 +4,8 @@ const { Op } = require('sequelize');
 function canAccessRoom(user, room) {
   if (!room) return false;
   if (room === 'interclubs') return true;
-  if (user.role === 'super_admin') return true;
   if (room.startsWith('club:')) {
-    return user.club_id && room === `club:${user.club_id}`;
+    return Boolean(user.club_id) && room === `club:${user.club_id}`;
   }
   return false;
 }
@@ -14,20 +13,11 @@ function canAccessRoom(user, room) {
 async function listRooms(req, res) {
   try {
     const rooms = [{ id: 'interclubs', name: 'Interclubs', type: 'inter' }];
-    if (req.user.role === 'super_admin') {
-      const clubs = await Club.findAll({ order: [['name', 'ASC']] });
-      clubs.forEach((c) => {
-        rooms.push({
-          id: `club:${c.id}`,
-          name: c.short_name || c.code || c.name,
-          type: 'club',
-        });
-      });
-    } else if (req.user.club_id) {
+    if (req.user.club_id) {
       const club = await Club.findByPk(req.user.club_id);
       rooms.push({
         id: `club:${req.user.club_id}`,
-        name: club ? club.short_name || club.code || club.name : 'Mon club',
+        name: club ? (club.short_name || club.code || club.name) : 'Mon club',
         type: 'club',
       });
     }
