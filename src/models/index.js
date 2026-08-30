@@ -9,6 +9,7 @@ const IndexHistory = require('./IndexHistory');
 const Competition = require('./Competition');
 const CompetitionRegistration = require('./CompetitionRegistration');
 const Article = require('./Article');
+const ClubEventLog = require('./ClubEventLog');
 const ArticleLike = require('./ArticleLike');
 const ArticleComment = require('./ArticleComment');
 const MatchPlayChampionship = require('./MatchPlayChampionship');
@@ -134,6 +135,7 @@ module.exports = {
   Competition,
   CompetitionRegistration,
   Article,
+  ClubEventLog,
   ArticleLike,
   ArticleComment,
   MatchPlayChampionship,
