@@ -1,1 +1,23 @@
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
 
+const ClubEventLog = sequelize.define(
+  'ClubEventLog',
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    actor_id: { type: DataTypes.UUID, allowNull: true },
+    action: { type: DataTypes.STRING(40), allowNull: false },
+    entity_type: { type: DataTypes.STRING(40), allowNull: false },
+    entity_id: { type: DataTypes.STRING(64), allowNull: true },
+    reason: { type: DataTypes.STRING(40), allowNull: true },
+    note: { type: DataTypes.STRING(500), allowNull: true },
+    payload: { type: DataTypes.JSON, allowNull: true },
+  },
+  { tableName: 'club_event_logs' }
+);
+
+module.exports = ClubEventLog;
