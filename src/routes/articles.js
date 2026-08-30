@@ -20,4 +20,12 @@ router.post('/', authenticate, requireRole('admin', 'super_admin'), ctrl.create)
 router.put('/:id', authenticate, requireRole('admin', 'super_admin'), ctrl.update);
 router.delete('/:id', authenticate, requireRole('admin', 'super_admin'), ctrl.remove);
 
+router.get('/:id/engagement', (req, res, next) => {
+  const header = req.headers.authorization;
+  if (header) return authenticate(req, res, () => ctrl.getEngagement(req, res, next));
+  return ctrl.getEngagement(req, res, next);
+});
+router.post('/:id/like', authenticate, ctrl.toggleLike);
+router.post('/:id/comments', authenticate, ctrl.addComment);
+
 module.exports = router;
