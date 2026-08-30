@@ -1,0 +1,21 @@
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
+
+const ArticleLike = sequelize.define(
+  'ArticleLike',
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    article_id: { type: DataTypes.UUID, allowNull: false },
+    user_id: { type: DataTypes.UUID, allowNull: false },
+  },
+  {
+    tableName: 'article_likes',
+    indexes: [{ unique: true, fields: ['article_id', 'user_id'] }],
+  }
+);
+
+module.exports = ArticleLike;
