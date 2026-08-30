@@ -119,4 +119,76 @@ async function remove(req, res) {
   }
 }
 
-module.exports = { listPublic, getOne, listAll, create, update, remove };
+
+async function engagement(articleId, userId) {
+  const { ArticleLike, ArticleComment, User } = require('../models');
+  const likes = await ArticleLike.count({ where: { article_id: articleId } });
+  const liked = userId
+    ? Boolean(await ArticleLike.findOne({ where: { article_id: articleId, user_id: userId } }))
+    : false;
+  const comments = await ArticleComment.findAll({
+    where: { article_id: articleId, hidden: false },
+    include: [{ model: User, as: 'user', attributes: ['id', 'first_name', 'last_name'] }],
+    order: [['createdAt', 'ASC']],
+    limit: 100,
+  });
+  return { likes_count: likes, liked, comments };
+}
+
+async function getEngagement(req, res) {
+  try {
+    const data = await engagement(req.params.id, req.user?.id);
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function toggleLike(req, res) {
+  try {
+    const { ArticleLike } = require('../models');
+    const article_id = req.params.id;
+    const user_id = req.user.id;
+    const existing = await ArticleLike.findOne({ where: { article_id, user_id } });
+    if (existing) await existing.destroy();
+    else await ArticleLike.create({ article_id, user_id });
+    const data = await engagement(article_id, user_id);
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function addComment(req, res) {
+  try {
+    const { ArticleComment } = require('../models');
+    const body = String(req.body.body || '').trim();
+    if (body.length < 2) return res.status(400).json({ error: 'Commentaire trop court' });
+    if (body.length > 500) return res.status(400).json({ error: 'Max 500 caractères' });
+    await ArticleComment.create({
+      article_id: req.params.id,
+      user_id: req.user.id,
+      body,
+    });
+    const data = await engagement(req.params.id, req.user.id);
+    res.status(201).json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+module.exports = {
+  listPublic,
+  getOne,
+  listAll,
+  create,
+  update,
+  remove,
+  getEngagement,
+  toggleLike,
+  addComment,
+};
+
