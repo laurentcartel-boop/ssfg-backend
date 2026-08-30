@@ -1,0 +1,112 @@
+const { ChatMessage, User, Club } = require('../models');
+const { Op } = require('sequelize');
+
+function canAccessRoom(user, room) {
+  if (!room) return false;
+  if (room === 'interclubs') return true;
+  if (user.role === 'super_admin') return true;
+  if (room.startsWith('club:')) {
+    return user.club_id && room === `club:${user.club_id}`;
+  }
+  return false;
+}
+
+async function listRooms(req, res) {
+  try {
+    const rooms = [{ id: 'interclubs', name: 'Interclubs', type: 'inter' }];
+    if (req.user.role === 'super_admin') {
+      const clubs = await Club.findAll({ order: [['name', 'ASC']] });
+      clubs.forEach((c) => {
+        rooms.push({
+          id: `club:${c.id}`,
+          name: c.short_name || c.code || c.name,
+          type: 'club',
+        });
+      });
+    } else if (req.user.club_id) {
+      const club = await Club.findByPk(req.user.club_id);
+      rooms.push({
+        id: `club:${req.user.club_id}`,
+        name: club ? club.short_name || club.code || club.name : 'Mon club',
+        type: 'club',
+      });
+    }
+    res.json({ rooms });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function listMessages(req, res) {
+  try {
+    const room = String(req.query.room || 'interclubs');
+    if (!canAccessRoom(req.user, room)) {
+      return res.status(403).json({ error: 'Salon réservé au club' });
+    }
+    const rows = await ChatMessage.findAll({
+      where: { room, hidden: false },
+      include: [{ model: User, as: 'user', attributes: ['id', 'first_name', 'last_name'] }],
+      order: [['createdAt', 'ASC']],
+      limit: 150,
+    });
+    res.json({
+      messages: rows.map((m) => ({
+        id: m.id,
+        body: m.body,
+        created_at: m.createdAt,
+        user_id: m.user_id,
+        author: m.user ? `${m.user.first_name} ${m.user.last_name}` : 'Joueur',
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function postMessage(req, res) {
+  try {
+    const room = String(req.body.room || 'interclubs');
+    const body = String(req.body.body || '').trim();
+    if (!canAccessRoom(req.user, room)) {
+      return res.status(403).json({ error: 'Salon réservé au club' });
+    }
+    if (body.length < 1) return res.status(400).json({ error: 'Message vide' });
+    if (body.length > 500) return res.status(400).json({ error: 'Max 500 caractères' });
+    const m = await ChatMessage.create({
+      room,
+      user_id: req.user.id,
+      body,
+    });
+    res.status(201).json({
+      message: {
+        id: m.id,
+        body: m.body,
+        created_at: m.createdAt,
+        user_id: m.user_id,
+        author: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function hideMessage(req, res) {
+  try {
+    const m = await ChatMessage.findByPk(req.params.id);
+    if (!m) return res.status(404).json({ error: 'Message introuvable' });
+    const own = m.user_id === req.user.id;
+    const admin = ['admin', 'super_admin'].includes(req.user.role);
+    if (!own && !admin) return res.status(403).json({ error: 'Interdit' });
+    await m.update({ hidden: true });
+    res.json({ message: 'Message retiré' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+module.exports = { listRooms, listMessages, postMessage, hideMessage };
