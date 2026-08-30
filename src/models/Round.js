@@ -37,6 +37,15 @@ const Round = sequelize.define('Round', {
     type: DataTypes.UUID,
     allowNull: true,
   },
+  under_investigation: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
+  investigation_note: {
+    type: DataTypes.STRING(255),
+    allowNull: true,
+  },
   closed_at: {
     type: DataTypes.DATE,
     allowNull: true,
