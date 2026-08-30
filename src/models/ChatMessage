@@ -14,7 +14,7 @@ const ChatMessage = sequelize.define(
     body: { type: DataTypes.STRING(500), allowNull: false },
     hidden: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   },
-  { tableName: 'chat_messages', indexes: [{ fields: ['room', 'createdAt'] }] }
+  { tableName: 'chat_messages' }
 );
 
 module.exports = ChatMessage;
