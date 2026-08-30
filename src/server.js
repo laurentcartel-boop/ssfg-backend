@@ -28,6 +28,7 @@ app.use('/api/rankings', require('./routes/rankings'));
 app.use('/api/import', require('./routes/import'));
 app.use('/api/competitions', require('./routes/competitions'));
 app.use('/api/articles', require('./routes/articles'));
+app.use('/api/club', require('./routes/club'));
 app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/accounting', require('./routes/accounting'));
 app.use('/api/matchplay', require('./routes/matchplay'));
@@ -220,6 +221,16 @@ async function start() {
     try {
       await sequelize.query(
         'ALTER TABLE marcassins_teams ADD COLUMN afternoon_round_id CHAR(36) NULL'
+      );
+    } catch (e) {}
+    try {
+      await sequelize.query(
+        'ALTER TABLE rounds ADD COLUMN under_investigation TINYINT(1) NOT NULL DEFAULT 0'
+      );
+    } catch (e) {}
+    try {
+      await sequelize.query(
+        'ALTER TABLE rounds ADD COLUMN investigation_note VARCHAR(255) NULL'
       );
     } catch (e) {}
     console.log('✅ Tables synchronisées');
