@@ -1,0 +1,20 @@
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
+
+const ChatMessage = sequelize.define(
+  'ChatMessage',
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    room: { type: DataTypes.STRING(80), allowNull: false },
+    user_id: { type: DataTypes.UUID, allowNull: false },
+    body: { type: DataTypes.STRING(500), allowNull: false },
+    hidden: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  },
+  { tableName: 'chat_messages', indexes: [{ fields: ['room', 'createdAt'] }] }
+);
+
+module.exports = ChatMessage;
