@@ -7,7 +7,7 @@ const { authenticate, requireRole } = require('../middleware/auth');
 router.get('/', ctrl.listPublic);
 
 // Admin list (before :id)
-router.get('/admin/all', authenticate, requireRole('admin', 'super_admin'), ctrl.listAll);
+router.get('/admin/all', authenticate, requireRole('admin', 'super_admin', 'platine_admin'), ctrl.listAll);
 
 router.get('/:id', (req, res, next) => {
   // optional auth for drafts
@@ -16,9 +16,9 @@ router.get('/:id', (req, res, next) => {
   return ctrl.getOne(req, res, next);
 });
 
-router.post('/', authenticate, requireRole('admin', 'super_admin'), ctrl.create);
-router.put('/:id', authenticate, requireRole('admin', 'super_admin'), ctrl.update);
-router.delete('/:id', authenticate, requireRole('admin', 'super_admin'), ctrl.remove);
+router.post('/', authenticate, requireRole('admin', 'super_admin', 'platine_admin'), ctrl.create);
+router.put('/:id', authenticate, requireRole('admin', 'super_admin', 'platine_admin'), ctrl.update);
+router.delete('/:id', authenticate, requireRole('admin', 'super_admin', 'platine_admin'), ctrl.remove);
 
 router.get('/:id/engagement', (req, res, next) => {
   const header = req.headers.authorization;
