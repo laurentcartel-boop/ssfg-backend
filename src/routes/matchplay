@@ -13,11 +13,11 @@ router.post('/matches/:id/close', ctrl.closeMatch);
 
 router.get('/championships', ctrl.listChampionships);
 router.get('/championships/:id', ctrl.getChampionship);
-router.post('/championships', requireRole('admin', 'super_admin'), ctrl.createChampionship);
-router.post('/championships/:id/entrants', requireRole('admin', 'super_admin'), ctrl.addEntrants);
-router.post('/championships/:id/draw', requireRole('admin', 'super_admin'), ctrl.drawBracket);
-router.post('/championships/:id/close', requireRole('super_admin'), ctrl.closeChampionship);
-router.delete('/championships/:id', requireRole('super_admin'), ctrl.deleteChampionship);
-router.delete('/matches/:id', requireRole('super_admin'), ctrl.deleteMatch);
+router.post('/championships', requireRole('super_admin', 'platine_admin'), ctrl.createChampionship);
+router.post('/championships/:id/entrants', requireRole('super_admin', 'platine_admin'), ctrl.addEntrants);
+router.post('/championships/:id/draw', requireRole('super_admin', 'platine_admin'), ctrl.drawBracket);
+router.post('/championships/:id/close', requireRole('super_admin', 'platine_admin'), ctrl.closeChampionship);
+router.delete('/championships/:id', requireRole('super_admin', 'platine_admin'), ctrl.deleteChampionship);
+router.delete('/matches/:id', requireRole('super_admin', 'platine_admin'), ctrl.deleteMatch);
 
 module.exports = router;
