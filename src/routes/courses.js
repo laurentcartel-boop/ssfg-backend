@@ -33,7 +33,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-router.post('/', requireRole('super_admin'), async (req, res) => {
+router.post('/', requireRole('super_admin', 'platine_admin'), async (req, res) => {
   try {
     const { name, short_name, holes_data, is_active } = req.body;
 
@@ -70,7 +70,7 @@ router.post('/', requireRole('super_admin'), async (req, res) => {
   }
 });
 
-router.patch('/:id', requireRole('super_admin'), async (req, res) => {
+router.patch('/:id', requireRole('super_admin', 'platine_admin'), async (req, res) => {
   try {
     const course = await Course.findByPk(req.params.id);
     if (!course) return res.status(404).json({ error: 'Parcours non trouvé' });
