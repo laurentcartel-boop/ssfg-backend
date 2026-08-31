@@ -67,8 +67,8 @@ async function register(req, res) {
     if (!['joueur', 'admin', 'super_admin', 'platine_admin'].includes(role)) {
       return res.status(400).json({ error: 'Rôle invalide' });
     }
-    if (role !== 'joueur' && req.user.role !== 'platine_admin') {
-      return res.status(403).json({ error: 'Seul un Admin Platine peut attribuer un rôle' });
+    if (role !== 'joueur' && !['platine_admin', 'super_admin'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Seul un Admin Platine ou un super-admin peut attribuer un rôle' });
     }
 
     const existing = await User.findOne({ where: { email: email.toLowerCase().trim() } });
