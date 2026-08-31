@@ -90,6 +90,31 @@ async function migrateMatchPlay() {
 }
 
 
+
+async function promotePlatine() {
+  const { User } = require('./models');
+  const raw = process.env.PLATINE_EMAILS || process.env.PLATINE_EMAIL || '';
+  const emails = raw
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  if (!emails.length) {
+    console.log('ℹ️ PLATINE_EMAILS non défini — aucun compte promu');
+    return;
+  }
+  for (const email of emails) {
+    const user = await User.findOne({ where: { email } });
+    if (!user) {
+      console.warn('⚠️ PLATINE: compte introuvable', email);
+      continue;
+    }
+    if (user.role !== 'platine_admin') {
+      await user.update({ role: 'platine_admin' });
+      console.log('✅ Admin Platine :', email);
+    }
+  }
+}
+
 async function seedClubs() {
   const { Club, User } = require('./models');
 
@@ -204,6 +229,7 @@ async function start() {
     try {
       await sequelize.sync();
       await seedClubs();
+      await promotePlatine();
       console.log('✅ sequelize.sync OK');
     } catch (syncErr) {
       console.error('❌ sequelize.sync:', syncErr);
