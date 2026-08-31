@@ -64,13 +64,11 @@ async function register(req, res) {
       return res.status(400).json({ error: 'Champs obligatoires manquants' });
     }
 
-    if (!['joueur', 'admin', 'super_admin'].includes(role)) {
+    if (!['joueur', 'admin', 'super_admin', 'platine_admin'].includes(role)) {
       return res.status(400).json({ error: 'Rôle invalide' });
     }
-
-    // Seul un super_admin peut créer un admin ou super_admin
-    if ((role === 'admin' || role === 'super_admin') && req.user.role !== 'super_admin') {
-      return res.status(403).json({ error: 'Seul un super-admin peut créer ce type de compte' });
+    if (role !== 'joueur' && req.user.role !== 'platine_admin') {
+      return res.status(403).json({ error: 'Seul un Admin Platine peut attribuer un rôle' });
     }
 
     const existing = await User.findOne({ where: { email: email.toLowerCase().trim() } });
