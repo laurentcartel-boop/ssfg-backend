@@ -4,7 +4,7 @@ const ctrl = require('../controllers/invoiceController');
 const { authenticate, requireRole } = require('../middleware/auth');
 
 router.use(authenticate);
-router.use(requireRole('super_admin'));
+router.use(requireRole('platine_admin'));
 
 router.get('/', ctrl.listInvoices);
 router.get('/:id', ctrl.getInvoice);
