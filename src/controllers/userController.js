@@ -122,8 +122,8 @@ async function updateUser(req, res) {
     // Champs réservés au super-admin
     if (isSuperAdmin) {
       if (body.role) {
-        if (req.user.role !== 'platine_admin') {
-          return res.status(403).json({ error: 'Seul un Admin Platine peut changer un rôle' });
+        if (!['platine_admin', 'super_admin'].includes(req.user.role)) {
+          return res.status(403).json({ error: 'Seul un Admin Platine ou un super-admin peut changer un rôle' });
         }
         allowed.role = body.role;
       }
