@@ -103,7 +103,8 @@ async function updateUser(req, res) {
     }
 
     const isSelf = req.user.id === user.id;
-    const isSuperAdmin = req.user.role === 'super_admin';
+    const isPlatine = req.user.role === 'platine_admin';
+    const isSuperAdmin = req.user.role === 'super_admin' || isPlatine;
 
     if (!isSelf && !isSuperAdmin) {
       return res.status(403).json({ error: 'Permissions insuffisantes' });
@@ -120,7 +121,12 @@ async function updateUser(req, res) {
 
     // Champs réservés au super-admin
     if (isSuperAdmin) {
-      if (body.role) allowed.role = body.role;
+      if (body.role) {
+        if (req.user.role !== 'platine_admin') {
+          return res.status(403).json({ error: 'Seul un Admin Platine peut changer un rôle' });
+        }
+        allowed.role = body.role;
+      }
     if (body.club_id !== undefined) allowed.club_id = body.club_id || null;
       if (body.is_active !== undefined) allowed.is_active = body.is_active;
       if (body.is_rookie !== undefined) allowed.is_rookie = body.is_rookie;
