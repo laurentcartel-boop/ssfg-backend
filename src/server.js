@@ -234,6 +234,13 @@ async function start() {
         'ALTER TABLE rounds ADD COLUMN investigation_note VARCHAR(255) NULL'
       );
     } catch (e) {}
+    try {
+      await sequelize.query(
+        "ALTER TABLE users MODIFY COLUMN role ENUM('joueur','admin','super_admin','platine_admin') NOT NULL DEFAULT 'joueur'"
+      );
+    } catch (e) {
+      console.warn('ALTER role', e.message);
+    }
     console.log('✅ Tables synchronisées');
 
     app.listen(PORT, () => {
