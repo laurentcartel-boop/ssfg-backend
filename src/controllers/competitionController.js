@@ -10,6 +10,115 @@ const {
 } = require('../models');
 const { calculateIndexChange } = require('../services/indexService');
 
+function formatPlayer(row) {
+  if (!row) return null;
+  const tp = row.to_par;
+  const brut =
+    tp == null ? '—' : tp === 0 ? 'E' : tp > 0 ? `+${tp}` : String(tp);
+  const net =
+    row.net_to_par == null ? '—' : Number(row.net_to_par).toFixed(1);
+  return {
+    user_id: row.user_id,
+    name: `${row.last_name || ''} ${row.first_name || ''}`.trim(),
+    brut,
+    net,
+    strokes: row.total_strokes,
+    series: row.series,
+  };
+}
+
+function pickBest(rows, field) {
+  const ready = rows.filter((r) => r[field] != null && r.holes_played >= 18);
+  ready.sort((a, b) => a[field] - b[field]);
+  return ready[0] || null;
+}
+
+function buildPalmares(leaderboard, competition) {
+  const finished = (leaderboard || []).filter((r) => r.holes_played >= 18);
+  const prizes = [];
+
+  const bestBrut = pickBest(finished, 'to_par');
+  prizes.push({
+    key: 'brut',
+    label: 'Meilleur brut',
+    player: formatPlayer(bestBrut),
+  });
+
+  const bestNet = pickBest(finished, 'net_to_par');
+  prizes.push({
+    key: 'net',
+    label: 'Meilleur net',
+    player: formatPlayer(bestNet),
+  });
+
+  const skipId = bestBrut?.user_id;
+  const seriesMeta = [
+    ['master', 'Meilleur brut Master'],
+    ['serie1', 'Meilleur brut Série 1'],
+    ['serie2', 'Meilleur brut Série 2'],
+  ];
+  for (const [key, label] of seriesMeta) {
+    const pool = finished.filter((r) => r.series === key && r.user_id !== skipId);
+    const winner = pickBest(pool, 'to_par');
+    prizes.push({
+      key,
+      label,
+      player: formatPlayer(winner),
+      note:
+        bestBrut && bestBrut.series === key
+          ? 'Le vainqueur brut général est déjà dans cette série — prix au suivant'
+          : null,
+    });
+  }
+
+  for (const [cat, label] of [
+    ['seniors', 'Meilleur sénior'],
+    ['veterans', 'Meilleur vétéran'],
+  ]) {
+    const pool = finished.filter((r) => (r.categories || []).includes(cat));
+    prizes.push({
+      key: cat,
+      label,
+      player: formatPlayer(pickBest(pool, 'to_par')),
+    });
+  }
+
+  const rookies = finished.filter((r) => (r.categories || []).includes('rookies'));
+  prizes.push({
+    key: 'rookies',
+    label: 'Meilleur rookie',
+    player: formatPlayer(pickBest(rookies, 'to_par')),
+  });
+
+  const hios = [];
+  for (const squad of competition.squads || []) {
+    for (const e of squad.exploits || []) {
+      if (e.exploit_type === 'hole_in_one') {
+        const row = leaderboard.find((r) => r.user_id === e.user_id);
+        hios.push({
+          hole: e.hole_number,
+          name: row
+            ? `${row.last_name || ''} ${row.first_name || ''}`.trim()
+            : e.user_id,
+        });
+      }
+    }
+  }
+  prizes.push({
+    key: 'hio',
+    label: 'Hole in one',
+    player: null,
+    hios,
+  });
+
+  return {
+    ready: finished.length > 0,
+    prizes,
+  };
+}
+
+
+
 /**
  * GET /api/competitions
  */
@@ -73,13 +182,18 @@ async function getCompetition(req, res) {
           as: 'squads',
           include: [
             {
+              model: require('../models').RoundExploit,
+              as: 'exploits',
+              required: false,
+            },
+            {
               model: RoundPlayer,
               as: 'players',
               include: [
                 {
                   model: User,
                   as: 'user',
-                  attributes: ['id', 'first_name', 'last_name', 'index_value', 'gender', 'club_id'],
+                  attributes: ['id', 'first_name', 'last_name', 'index_value', 'gender', 'club_id', 'birth_date', 'is_rookie'],
                   include: [
                     {
                       model: require('../models').Club,
@@ -122,11 +236,14 @@ async function getCompetition(req, res) {
         const toPar = holesPlayed ? totalStrokes - parPlayed : null;
         const startingIndex = Number(rp.starting_index ?? rp.user?.index_value ?? 0);
 
+        const { getIndexSeries, getCategories } = require('../services/indexService');
         leaderboard.push({
           user_id: rp.user_id,
           first_name: rp.user?.first_name,
           last_name: rp.user?.last_name,
           index_value: startingIndex,
+          series: getIndexSeries(startingIndex),
+          categories: getCategories(rp.user || {}),
           squad_id: squad.id,
           squad_name: squad.name,
           squad_status: squad.status,
@@ -145,9 +262,12 @@ async function getCompetition(req, res) {
       return a.total_strokes - b.total_strokes;
     });
 
+    const palmares = buildPalmares(leaderboard, competition);
+    const compJson = typeof competition.toJSON === 'function' ? competition.toJSON() : competition;
     res.json({
-      competition,
+      competition: { ...compJson, leaderboard, palmares },
       leaderboard,
+      palmares,
     });
   } catch (err) {
     console.error('getCompetition error:', err);
