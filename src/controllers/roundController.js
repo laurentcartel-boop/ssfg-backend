@@ -270,11 +270,20 @@ async function updateHoleScores(req, res) {
     }
 
     // Vérifier que l'utilisateur a le droit (admin/super_admin ou joueur de la partie)
-    const isAdmin = ['admin', 'super_admin'].includes(req.user.role);
+    const isAdmin = ['admin', 'super_admin', 'platine_admin'].includes(req.user.role);
     const isPlayer = round.players.some((p) => p.user_id === req.user.id);
     if (!isAdmin && !isPlayer) {
       await t.rollback();
       return res.status(403).json({ error: 'Vous ne participez pas à cette partie' });
+    }
+    if (round.scoring_user_id && round.scoring_user_id !== req.user.id && !isAdmin) {
+      await t.rollback();
+      return res.status(403).json({
+        error: 'Un autre joueur saisit déjà cette partie. Mode lecture seule.',
+      });
+    }
+    if (!round.scoring_user_id) {
+      await round.update({ scoring_user_id: req.user.id }, { transaction: t });
     }
 
     const holePar = round.course.holes_data.find((h) => h.hole === hole_number)?.par;
@@ -625,6 +634,82 @@ async function setInvestigation(req, res) {
       message: on ? 'Partie placée sous enquête' : 'Enquête levée',
       under_investigation: on,
     });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+
+async function claimScoring(req, res) {
+  try {
+    const round = await Round.findByPk(req.params.id, {
+      include: [{ model: RoundPlayer, as: 'players' }],
+    });
+    if (!round) return res.status(404).json({ error: 'Partie non trouvée' });
+    if (round.status === 'closed') {
+      return res.status(400).json({ error: 'Partie clôturée' });
+    }
+    const isAdmin = ['admin', 'super_admin', 'platine_admin'].includes(req.user.role);
+    const isPlayer = (round.players || []).some((p) => p.user_id === req.user.id);
+    if (!isAdmin && !isPlayer) {
+      return res.status(403).json({ error: 'Pas dans cette partie' });
+    }
+    const force = Boolean(req.body?.force) && isAdmin;
+    if (round.scoring_user_id && round.scoring_user_id !== req.user.id && !force) {
+      return res.status(409).json({
+        error: 'Déjà un scoreur',
+        scoring_user_id: round.scoring_user_id,
+      });
+    }
+    await round.update({ scoring_user_id: req.user.id });
+    res.json({ message: 'Tu saisis cette partie', scoring_user_id: req.user.id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function listCloseAlerts(req, res) {
+  try {
+    const rounds = await Round.findAll({
+      where: { status: 'in_progress' },
+      include: [
+        { model: RoundPlayer, as: 'players', include: [{ model: HoleScore, as: 'holeScores' }] },
+        { model: Course, as: 'course', attributes: ['short_name'] },
+      ],
+      order: [['updated_at', 'DESC']],
+      limit: 50,
+    });
+    const twoH = Date.now() - 2 * 60 * 60 * 1000;
+    const alerts = [];
+    for (const round of rounds) {
+      const players = round.players || [];
+      if (!players.length) continue;
+      let last = round.updatedAt ? new Date(round.updatedAt).getTime() : 0;
+      let complete = true;
+      for (const rp of players) {
+        const holes = (rp.holeScores || []).filter((h) => Number(h.score) >= 1);
+        if (holes.length < 18) complete = false;
+        for (const h of rp.holeScores || []) {
+          const ts = new Date(h.updatedAt || h.createdAt || 0).getTime();
+          if (ts > last) last = ts;
+        }
+      }
+      const stale = last && last < twoH;
+      if (complete || stale) {
+        alerts.push({
+          id: round.id,
+          name: round.name,
+          date: round.date,
+          course: round.course?.short_name,
+          complete,
+          stale,
+          hours: last ? Math.round((Date.now() - last) / 3600000) : null,
+        });
+      }
+    }
+    res.json({ alerts });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -1037,6 +1122,8 @@ module.exports = {
   closeRound,
   setPlayerDnf,
   deleteRound,
+  claimScoring,
+  listCloseAlerts,
   setInvestigation,
   writeClubLog,
   listComments,
