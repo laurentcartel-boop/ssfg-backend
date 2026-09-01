@@ -6,7 +6,7 @@ const { importHelloAsso } = require('../controllers/helloassoImportController');
 router.use(authenticate);
 router.post(
   '/helloasso',
-  requireRole('admin', 'super_admin'),
+  requireRole('admin', 'super_admin', 'platine_admin'),
   importHelloAsso
 );
 
