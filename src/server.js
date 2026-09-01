@@ -267,6 +267,11 @@ async function start() {
     } catch (e) {
       console.warn('ALTER role', e.message);
     }
+    try {
+      await sequelize.query(
+        'ALTER TABLE rounds ADD COLUMN scoring_user_id CHAR(36) NULL'
+      );
+    } catch (e) {}
     console.log('✅ Tables synchronisées');
 
     app.listen(PORT, () => {
