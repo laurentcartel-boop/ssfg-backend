@@ -655,7 +655,7 @@ async function claimScoring(req, res) {
     if (!isAdmin && !isPlayer) {
       return res.status(403).json({ error: 'Pas dans cette partie' });
     }
-    const force = Boolean(req.body?.force) && isAdmin;
+    const force = Boolean(req.body?.force) && (isAdmin || isPlayer);
     if (round.scoring_user_id && round.scoring_user_id !== req.user.id && !force) {
       return res.status(409).json({
         error: 'Déjà un scoreur',
