@@ -7,6 +7,7 @@ const { Round, RoundPlayer } = require('../models');
 router.use(authenticate);
 
 router.get('/', roundController.listRounds);
+router.get('/alerts/close', roundController.listCloseAlerts);
 router.get('/exploits/album', roundController.listExploitsAlbum);
 router.get('/:id/comments', roundController.listComments);
 router.get('/:id/exploits', roundController.listExploits);
@@ -24,6 +25,7 @@ router.post('/:id/players', requireRole('admin', 'super_admin', 'platine_admin')
 router.delete('/:id/players/:userId', requireRole('admin', 'super_admin', 'platine_admin'), roundController.removePlayer);
 
 router.put('/:id/scores', roundController.updateHoleScores);
+router.post('/:id/claim', roundController.claimScoring);
 router.patch('/:id/investigate', requireRole('super_admin', 'platine_admin'), roundController.setInvestigation);
 router.delete('/:id', requireRole('super_admin', 'platine_admin'), roundController.deleteRound);
 router.post('/:id/remove', requireRole('super_admin', 'platine_admin'), roundController.deleteRound);
