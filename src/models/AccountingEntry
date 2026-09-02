@@ -74,6 +74,10 @@ const AccountingEntry = sequelize.define(
       type: DataTypes.UUID,
       allowNull: true,
     },
+    club_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
   },
   {
     tableName: 'accounting_entries',
