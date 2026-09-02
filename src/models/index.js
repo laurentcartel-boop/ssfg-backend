@@ -12,6 +12,8 @@ const Article = require('./Article');
 const ClubEventLog = require('./ClubEventLog');
 const ChatMessage = require('./ChatMessage');
 const ChatRead = require('./ChatRead');
+const BestiolesSeason = require('./BestiolesSeason');
+const BestiolesFixture = require('./BestiolesFixture');
 const ArticleLike = require('./ArticleLike');
 const ArticleComment = require('./ArticleComment');
 const MatchPlayChampionship = require('./MatchPlayChampionship');
@@ -141,6 +143,8 @@ module.exports = {
   ClubEventLog,
   ChatMessage,
   ChatRead,
+  BestiolesSeason,
+  BestiolesFixture,
   ArticleLike,
   ArticleComment,
   MatchPlayChampionship,
@@ -153,3 +157,8 @@ module.exports = {
   MarcassinsTeam,
   MarcassinsRegistration,
 };
+
+BestiolesSeason.hasMany(BestiolesFixture, { foreignKey: 'season_id', as: 'fixtures', constraints: false });
+BestiolesFixture.belongsTo(BestiolesSeason, { foreignKey: 'season_id', as: 'season', constraints: false });
+BestiolesFixture.belongsTo(Club, { foreignKey: 'home_club_id', as: 'homeClub', constraints: false });
+BestiolesFixture.belongsTo(Club, { foreignKey: 'away_club_id', as: 'awayClub', constraints: false });
