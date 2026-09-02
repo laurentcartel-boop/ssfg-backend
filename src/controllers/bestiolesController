@@ -1,0 +1,237 @@
+const { Op } = require('sequelize');
+const { BestiolesSeason, BestiolesFixture, Club, User } = require('../models');
+
+const GAMES = [
+  { key: 'simple1', label: 'Simple 1 (match play)' },
+  { key: 'simple2', label: 'Simple 2 (match play)' },
+  { key: 'fourball', label: 'Fourball' },
+  { key: 'scramble', label: 'Scramble' },
+];
+
+function emptyLineup() {
+  return {
+    simple1: null,
+    simple2: null,
+    fourball: [null, null],
+    scramble: [null, null],
+    subs: [null, null],
+  };
+}
+
+function emptyScores() {
+  const o = {};
+  GAMES.forEach((g) => {
+    o[g.key] = { winner: null, ga: 0 };
+  });
+  return o;
+}
+
+function fixtureTotals(fx) {
+  const scores = fx.scores || emptyScores();
+  let gamesH = 0;
+  let gamesA = 0;
+  let hga = 0;
+  let aga = 0;
+  let played = 0;
+  for (const g of GAMES) {
+    const s = scores[g.key] || { winner: null, ga: 0 };
+    const ga = Number(s.ga) || 0;
+    if (s.winner === 'home') {
+      gamesH += 1;
+      played += 1;
+      hga += Math.abs(ga);
+      aga -= Math.abs(ga);
+    } else if (s.winner === 'away') {
+      gamesA += 1;
+      played += 1;
+      aga += Math.abs(ga);
+      hga -= Math.abs(ga);
+    } else if (s.winner === 'half') {
+      gamesH += 0.5;
+      gamesA += 0.5;
+      played += 1;
+    }
+  }
+  // 1 pt par partie + 1 pt de rencontre (2-2 → 1 chacun)
+  let hp = gamesH;
+  let ap = gamesA;
+  if (played > 0) {
+    if (gamesH > gamesA) hp += 1;
+    else if (gamesA > gamesH) ap += 1;
+    else {
+      hp += 1;
+      ap += 1;
+    }
+  }
+  return {
+    home_points: hp,
+    away_points: ap,
+    home_games: gamesH,
+    away_games: gamesA,
+    home_ga: hga,
+    away_ga: aga,
+  };
+}
+
+async function standings(seasonId) {
+  const fixtures = await BestiolesFixture.findAll({ where: { season_id: seasonId } });
+  const map = {};
+  for (const fx of fixtures) {
+    for (const cid of [fx.home_club_id, fx.away_club_id]) {
+      if (!map[cid]) map[cid] = { club_id: cid, played: 0, points: 0, ga: 0, wins: 0 };
+    }
+    const t = fixtureTotals(fx);
+    const played = Object.values(fx.scores || {}).some((s) => s && s.winner);
+    if (!played) continue;
+    map[fx.home_club_id].played += 1;
+    map[fx.away_club_id].played += 1;
+    map[fx.home_club_id].points += t.home_points;
+    map[fx.away_club_id].points += t.away_points;
+    map[fx.home_club_id].ga += t.home_ga;
+    map[fx.away_club_id].ga += t.away_ga;
+    if (t.home_points > t.away_points) map[fx.home_club_id].wins += 1;
+    if (t.away_points > t.home_points) map[fx.away_club_id].wins += 1;
+  }
+  const clubs = await Club.findAll();
+  const byId = {};
+  clubs.forEach((c) => {
+    byId[c.id] = c;
+  });
+  return Object.values(map)
+    .map((r) => ({
+      ...r,
+      club: byId[r.club_id]
+        ? { id: byId[r.club_id].id, code: byId[r.club_id].code, short_name: byId[r.club_id].short_name, name: byId[r.club_id].name }
+        : null,
+    }))
+    .sort((a, b) => b.points - a.points || b.ga - a.ga || b.wins - a.wins);
+}
+
+async function listSeasons(req, res) {
+  try {
+    const rows = await BestiolesSeason.findAll({ order: [['year', 'DESC']] });
+    res.json({ seasons: rows });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function getSeason(req, res) {
+  try {
+    const season = await BestiolesSeason.findByPk(req.params.id, {
+      include: [
+        {
+          model: BestiolesFixture,
+          as: 'fixtures',
+          include: [
+            { model: Club, as: 'homeClub', attributes: ['id', 'code', 'short_name', 'name'] },
+            { model: Club, as: 'awayClub', attributes: ['id', 'code', 'short_name', 'name'] },
+          ],
+        },
+      ],
+      order: [[{ model: BestiolesFixture, as: 'fixtures' }, 'day_number', 'ASC']],
+    });
+    if (!season) return res.status(404).json({ error: 'Saison introuvable' });
+    const table = await standings(season.id);
+    const fixtures = (season.fixtures || []).map((fx) => {
+      const j = fx.toJSON();
+      j.totals = fixtureTotals(fx);
+      return j;
+    });
+    res.json({ season: { ...season.toJSON(), fixtures }, table, games: GAMES });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+async function createSeason(req, res) {
+  try {
+    const year = Number(req.body.year) || new Date().getFullYear();
+    const clubs = await Club.findAll({
+      where: { code: { [Op.in]: ['SSFG', 'AFG', 'HAC', 'RMFC'] } },
+      order: [['sort_order', 'ASC']],
+    });
+    if (clubs.length < 4) {
+      return res.status(400).json({ error: 'Il faut les 4 clubs SSFG, AFG, HAC, RMFC' });
+    }
+    const [A, B, C, D] = shuffle(clubs).map((c) => c.id);
+    const season = await BestiolesSeason.create({
+      year,
+      name: req.body.name || `Trophée des 4 Bestioles ${year}`,
+      status: 'open',
+      created_by: req.user.id,
+    });
+    const pairs = [
+      [1, A, B],
+      [1, C, D],
+      [2, A, C],
+      [2, B, D],
+      [3, A, D],
+      [3, B, C],
+    ];
+    for (const [day, home, away] of pairs) {
+      await BestiolesFixture.create({
+        season_id: season.id,
+        day_number: day,
+        home_club_id: home,
+        away_club_id: away,
+        lineup: { home: emptyLineup(), away: emptyLineup() },
+        scores: emptyScores(),
+      });
+    }
+    res.status(201).json({ season });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function updateFixture(req, res) {
+  try {
+    const fx = await BestiolesFixture.findByPk(req.params.fixtureId);
+    if (!fx) return res.status(404).json({ error: 'Rencontre introuvable' });
+    const body = req.body || {};
+    const fields = {};
+    if (body.play_date !== undefined) fields.play_date = body.play_date || null;
+    if (body.lineup) fields.lineup = body.lineup;
+    if (body.scores) fields.scores = body.scores;
+    if (body.status) fields.status = body.status;
+    await fx.update(fields);
+    res.json({ fixture: fx, totals: fixtureTotals(fx) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function deleteSeason(req, res) {
+  try {
+    const s = await BestiolesSeason.findByPk(req.params.id);
+    if (!s) return res.status(404).json({ error: 'Introuvable' });
+    await BestiolesFixture.destroy({ where: { season_id: s.id } });
+    await s.destroy();
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+module.exports = {
+  listSeasons,
+  getSeason,
+  createSeason,
+  updateFixture,
+  deleteSeason,
+};
