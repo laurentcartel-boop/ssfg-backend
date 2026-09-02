@@ -11,6 +11,7 @@ const CompetitionRegistration = require('./CompetitionRegistration');
 const Article = require('./Article');
 const ClubEventLog = require('./ClubEventLog');
 const ChatMessage = require('./ChatMessage');
+const ChatRead = require('./ChatRead');
 const ArticleLike = require('./ArticleLike');
 const ArticleComment = require('./ArticleComment');
 const MatchPlayChampionship = require('./MatchPlayChampionship');
@@ -139,6 +140,7 @@ module.exports = {
   Article,
   ClubEventLog,
   ChatMessage,
+  ChatRead,
   ArticleLike,
   ArticleComment,
   MatchPlayChampionship,
