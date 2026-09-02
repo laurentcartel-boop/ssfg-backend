@@ -918,9 +918,9 @@ async function addExploit(req, res) {
     }
     const hole_number = parseInt(req.body.hole_number, 10);
     const exploit_type = String(req.body.exploit_type || '').toLowerCase();
-    const allowed = ['hole_in_one', 'albatross', 'eagle'];
+    const allowed = ['hole_in_one', 'albatross', 'eagle', 'moment'];
     if (!allowed.includes(exploit_type)) {
-      return res.status(400).json({ error: 'Type: hole_in_one, albatross ou eagle' });
+      return res.status(400).json({ error: 'Type: hole_in_one, albatross, eagle ou moment' });
     }
     if (!hole_number || hole_number < 1 || hole_number > 18) {
       return res.status(400).json({ error: 'Trou invalide' });
@@ -1071,7 +1071,7 @@ async function updateExploit(req, res) {
       fields.image_url = req.body.image_url || null;
     }
     if (req.body.exploit_type) {
-      const allowed = ['hole_in_one', 'albatross', 'eagle'];
+      const allowed = ['hole_in_one', 'albatross', 'eagle', 'moment'];
       const t = String(req.body.exploit_type).toLowerCase();
       if (!allowed.includes(t)) {
         return res.status(400).json({ error: 'Type invalide' });
