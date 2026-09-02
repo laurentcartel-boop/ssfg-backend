@@ -1,0 +1,19 @@
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
+
+const BestiolesFixture = sequelize.define(
+  'BestiolesFixture',
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    season_id: { type: DataTypes.UUID, allowNull: false },
+    day_number: { type: DataTypes.INTEGER, allowNull: false },
+    play_date: { type: DataTypes.DATEONLY, allowNull: true },
+    home_club_id: { type: DataTypes.UUID, allowNull: false },
+    away_club_id: { type: DataTypes.UUID, allowNull: false },
+    lineup: { type: DataTypes.JSON, allowNull: true },
+    scores: { type: DataTypes.JSON, allowNull: true },
+    status: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'pending' },
+  },
+  { tableName: 'bestioles_fixtures' }
+);
+module.exports = BestiolesFixture;
