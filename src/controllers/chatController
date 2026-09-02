@@ -1,4 +1,4 @@
-const { ChatMessage, User, Club } = require('../models');
+const { ChatMessage, User, Club, ChatRead } = require('../models');
 const { Op } = require('sequelize');
 
 function canAccessRoom(user, room) {
@@ -99,4 +99,56 @@ async function hideMessage(req, res) {
   }
 }
 
-module.exports = { listRooms, listMessages, postMessage, hideMessage };
+
+async function accessibleRooms(user) {
+  const rooms = ['interclubs'];
+  if (user.club_id) rooms.push(`club:${user.club_id}`);
+  return rooms;
+}
+
+async function unread(req, res) {
+  try {
+    const rooms = await accessibleRooms(req.user);
+    const reads = await ChatRead.findAll({
+      where: { user_id: req.user.id, room: rooms },
+    });
+    const last = {};
+    reads.forEach((r) => {
+      last[r.room] = r.last_read_at;
+    });
+    const byRoom = {};
+    let total = 0;
+    for (const room of rooms) {
+      const where = { room, hidden: false, user_id: { [Op.ne]: req.user.id } };
+      const since = last[room] || new Date(Date.now() - 7 * 24 * 3600 * 1000);
+      where.createdAt = { [Op.gt]: since };
+      const n = await ChatMessage.count({ where });
+      byRoom[room] = n;
+      total += n;
+    }
+    res.json({ total, byRoom });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function markRead(req, res) {
+  try {
+    const room = String(req.body.room || req.query.room || 'interclubs');
+    if (!canAccessRoom(req.user, room)) {
+      return res.status(403).json({ error: 'Salon réservé au club' });
+    }
+    const [row] = await ChatRead.findOrCreate({
+      where: { user_id: req.user.id, room },
+      defaults: { last_read_at: new Date() },
+    });
+    await row.update({ last_read_at: new Date() });
+    res.json({ ok: true, room });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+module.exports = { listRooms, listMessages, postMessage, hideMessage, unread, markRead };
