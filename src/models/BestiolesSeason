@@ -1,0 +1,16 @@
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
+
+const BestiolesSeason = sequelize.define(
+  'BestiolesSeason',
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    year: { type: DataTypes.INTEGER, allowNull: false },
+    name: { type: DataTypes.STRING(120), allowNull: false, defaultValue: 'Trophée des 4 Bestioles' },
+    status: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'draft' },
+    notes: { type: DataTypes.STRING(500), allowNull: true },
+    created_by: { type: DataTypes.UUID, allowNull: true },
+  },
+  { tableName: 'bestioles_seasons' }
+);
+module.exports = BestiolesSeason;
