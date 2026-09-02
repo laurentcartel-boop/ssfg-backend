@@ -282,14 +282,22 @@ async function getCompetition(req, res) {
  */
 async function createCompetition(req, res) {
   try {
-    const { name, course_id, date, scope_type = 'open', club_id = null } = req.body;
+    let { name, course_id, date, scope_type = 'open', club_id = null } = req.body;
     if (!name || !course_id || !date) {
       return res.status(400).json({ error: 'name, course_id et date sont obligatoires' });
     }
 
-    const scope = ['club', 'interclub', 'open'].includes(scope_type)
+    let scope = ['club', 'interclub', 'open'].includes(scope_type)
       ? scope_type
       : 'open';
+    // Admin de club : uniquement une compétition de SON club
+    if (req.user.role === 'admin') {
+      if (!req.user.club_id) {
+        return res.status(403).json({ error: 'Admin sans club : impossible de créer une compétition' });
+      }
+      scope = 'club';
+      club_id = req.user.club_id;
+    }
     if (scope === 'club' && !club_id) {
       return res.status(400).json({ error: 'club_id obligatoire pour une compétition de club' });
     }
