@@ -8,6 +8,7 @@ router.get('/', ctrl.listSeasons);
 router.get('/:id', ctrl.getSeason);
 router.post('/', requireRole('super_admin', 'platine_admin'), ctrl.createSeason);
 router.patch('/fixtures/:fixtureId', requireRole('super_admin', 'platine_admin'), ctrl.updateFixture);
+router.post('/fixtures/:fixtureId/launch', requireRole('super_admin', 'platine_admin'), ctrl.launchFixture);
 router.delete('/:id', requireRole('super_admin', 'platine_admin'), ctrl.deleteSeason);
 
 module.exports = router;
