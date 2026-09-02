@@ -1,0 +1,19 @@
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
+
+const ChatRead = sequelize.define(
+  'ChatRead',
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    user_id: { type: DataTypes.UUID, allowNull: false },
+    room: { type: DataTypes.STRING(80), allowNull: false },
+    last_read_at: { type: DataTypes.DATE, allowNull: false },
+  },
+  { tableName: 'chat_reads' }
+);
+
+module.exports = ChatRead;
