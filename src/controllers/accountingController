@@ -1,5 +1,5 @@
 const { Op } = require('sequelize');
-const { AccountingEntry, User } = require('../models');
+const { AccountingEntry, User, Club } = require('../models');
 
 function num(v) {
   if (v === null || v === undefined || v === '') return 0;
@@ -174,11 +174,20 @@ function mapRow(raw, defaultYear) {
   };
 }
 
+
+async function resolveClubId(user) {
+  if (user?.club_id) return user.club_id;
+  const ssfg = await Club.findOne({ where: { code: 'SSFG' } });
+  return ssfg ? ssfg.id : null;
+}
+
 async function listEntries(req, res) {
   try {
     const where = {};
     if (req.query.year) where.year = Number(req.query.year);
     if (req.query.type) where.entry_type = req.query.type;
+    const clubId = await resolveClubId(req.user);
+    if (clubId) where.club_id = clubId;
     const entries = await AccountingEntry.findAll({
       where,
       order: [
@@ -197,7 +206,10 @@ async function listEntries(req, res) {
 async function summary(req, res) {
   try {
     const year = Number(req.query.year) || new Date().getFullYear();
-    const entries = await AccountingEntry.findAll({ where: { year } });
+    const clubId = await resolveClubId(req.user);
+    const where = { year };
+    if (clubId) where.club_id = clubId;
+    const entries = await AccountingEntry.findAll({ where });
     let totalRecipes = 0;
     let totalExpenses = 0;
     let reportAmount = 0; // solde d'ouverture / report à nouveau (recettes de type REPORT)
@@ -269,7 +281,11 @@ async function summary(req, res) {
 
 async function years(req, res) {
   try {
+    const clubId = await resolveClubId(req.user);
+    const yWhere = {};
+    if (clubId) yWhere.club_id = clubId;
     const rows = await AccountingEntry.findAll({
+      where: yWhere,
       attributes: ['year'],
       group: ['year'],
       order: [['year', 'DESC']],
@@ -310,6 +326,7 @@ async function createEntry(req, res) {
       notes: body.notes || null,
       attachment_url: body.attachment_url || null,
       created_by: req.user.id,
+      club_id: await resolveClubId(req.user),
     });
     res.status(201).json({ entry });
   } catch (err) {
@@ -322,6 +339,10 @@ async function updateEntry(req, res) {
   try {
     const entry = await AccountingEntry.findByPk(req.params.id);
     if (!entry) return res.status(404).json({ error: 'Écriture introuvable' });
+    const clubId = await resolveClubId(req.user);
+    if (clubId && entry.club_id && entry.club_id !== clubId) {
+      return res.status(403).json({ error: 'Écriture d\'un autre club' });
+    }
     const body = req.body || {};
     const fields = {};
     if (body.entry_date) fields.entry_date = parseDate(body.entry_date);
@@ -360,7 +381,10 @@ async function deleteYear(req, res) {
   try {
     const year = Number(req.params.year);
     if (!year) return res.status(400).json({ error: 'Année invalide' });
-    const n = await AccountingEntry.destroy({ where: { year } });
+    const clubId = await resolveClubId(req.user);
+    const dw = { year };
+    if (clubId) dw.club_id = clubId;
+    const n = await AccountingEntry.destroy({ where: dw });
     res.json({ message: `${n} écriture(s) supprimée(s) pour ${year}` });
   } catch (err) {
     console.error(err);
@@ -388,11 +412,12 @@ async function importEntries(req, res) {
       return res.status(400).json({ error: 'Aucune ligne valide trouvée' });
     }
     const replace = req.body.replace === true || req.body.replace === '1';
-    if (replace) {
-      await AccountingEntry.destroy({ where: { year } });
+    const clubIdImport = await resolveClubId(req.user);
+    if (replace && clubIdImport) {
+      await AccountingEntry.destroy({ where: { year, club_id: clubIdImport } });
     }
     const created = await AccountingEntry.bulkCreate(
-      mapped.map((m) => ({ ...m, created_by: req.user.id }))
+      mapped.map((m) => ({ ...m, created_by: req.user.id, club_id: clubIdImport }))
     );
     res.status(201).json({
       message: `${created.length} écriture(s) importée(s) pour ${year}`,
@@ -432,11 +457,14 @@ const PCGA_CATALOG = {
 };
 
 async function listAccounts(req, res) {
+  const clubIdAcc = await resolveClubId(req.user);
+
   try {
     const entries = await AccountingEntry.findAll({
       attributes: ['account_number'],
       where: {
         account_number: { [require('sequelize').Op.ne]: null },
+        ...(clubIdAcc ? { club_id: clubIdAcc } : {}),
       },
       limit: 5000,
     });
