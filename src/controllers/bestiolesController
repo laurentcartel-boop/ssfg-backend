@@ -1,5 +1,5 @@
 const { Op } = require('sequelize');
-const { BestiolesSeason, BestiolesFixture, Club, User } = require('../models');
+const { BestiolesSeason, BestiolesFixture, Club, User, Course, Round, RoundPlayer } = require('../models');
 
 const GAMES = [
   { key: 'simple1', label: 'Simple 1 (match play)' },
@@ -228,10 +228,94 @@ async function deleteSeason(req, res) {
   }
 }
 
+
+function collectPlayers(lineup, key) {
+  const h = lineup.home || {};
+  const a = lineup.away || {};
+  if (key === 'simple1' || key === 'simple2') {
+    return [h[key], a[key]].filter(Boolean);
+  }
+  return [...(h[key] || []), ...(a[key] || [])].filter(Boolean);
+}
+
+async function launchFixture(req, res) {
+  try {
+    const fx = await BestiolesFixture.findByPk(req.params.fixtureId, {
+      include: [
+        { model: Club, as: 'homeClub' },
+        { model: Club, as: 'awayClub' },
+        { model: BestiolesSeason, as: 'season' },
+      ],
+    });
+    if (!fx) return res.status(404).json({ error: 'Rencontre introuvable' });
+    const course = await Course.findOne({ where: { is_active: true }, order: [['name', 'ASC']] });
+    if (!course) return res.status(400).json({ error: 'Aucun parcours actif' });
+    const date = fx.play_date || new Date().toISOString().slice(0, 10);
+    const lineup = fx.lineup || { home: {}, away: {} };
+    const existing = lineup.live_rounds || {};
+    const labels = {
+      simple1: 'Simple 1',
+      simple2: 'Simple 2',
+      fourball: 'Fourball',
+      scramble: 'Scramble',
+    };
+    const homeN = fx.homeClub?.short_name || 'Dom';
+    const awayN = fx.awayClub?.short_name || 'Ext';
+    const created = [];
+    let minutes = 0;
+    for (const key of ['simple1', 'simple2', 'fourball', 'scramble']) {
+      if (existing[key]) {
+        created.push({ key, round_id: existing[key], reused: true });
+        minutes += 5;
+        continue;
+      }
+      const ids = [...new Set(collectPlayers(lineup, key))];
+      if (ids.length < 2) {
+        return res.status(400).json({ error: `Feuille incomplète pour ${labels[key]}` });
+      }
+      const players = await User.findAll({ where: { id: ids } });
+      if (players.length < 2) {
+        return res.status(400).json({ error: `Joueurs introuvables (${labels[key]})` });
+      }
+      const hh = 14 + Math.floor(minutes / 60);
+      const mm = String(minutes % 60).padStart(2, '0');
+      const round = await Round.create({
+        name: `4 Bestioles J${fx.day_number} ${labels[key]} ${homeN}-${awayN} · ${hh}h${mm}`,
+        type: 'entrainement',
+        course_id: course.id,
+        date,
+        status: 'in_progress',
+        created_by: req.user.id,
+      });
+      for (const player of players) {
+        await RoundPlayer.create({
+          round_id: round.id,
+          user_id: player.id,
+          starting_index: player.index_value,
+        });
+      }
+      existing[key] = round.id;
+      created.push({ key, round_id: round.id, tee: `${hh}h${mm}` });
+      minutes += 5;
+    }
+    lineup.live_rounds = existing;
+    await fx.update({ lineup, status: 'live' });
+    res.json({
+      message: '4 parties lancées (hors index), départs 14h00 / 05 / 10 / 15',
+      live_rounds: existing,
+      created,
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Erreur serveur', detail: e.message });
+  }
+}
+
 module.exports = {
   listSeasons,
   getSeason,
   createSeason,
   updateFixture,
   deleteSeason,
+  launchFixture,
 };
