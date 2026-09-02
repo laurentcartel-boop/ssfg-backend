@@ -229,6 +229,27 @@ async function start() {
     try {
       await sequelize.sync();
       await seedClubs();
+      try {
+        await sequelize.query(
+          'ALTER TABLE accounting_entries ADD COLUMN club_id CHAR(36) NULL'
+        );
+        console.log('➕ accounting club_id');
+      } catch (e) {}
+      try {
+        const [ssfg] = await sequelize.query(
+          "SELECT id FROM clubs WHERE code = 'SSFG' LIMIT 1"
+        );
+        const sid = ssfg && ssfg[0] && ssfg[0].id;
+        if (sid) {
+          await sequelize.query(
+            'UPDATE accounting_entries SET club_id = :sid WHERE club_id IS NULL',
+            { replacements: { sid } }
+          );
+          console.log('✅ écritures existantes → SSFG');
+        }
+      } catch (e) {
+        console.warn('migrate accounting club', e.message);
+      }
       await promotePlatine();
       console.log('✅ sequelize.sync OK');
     } catch (syncErr) {
