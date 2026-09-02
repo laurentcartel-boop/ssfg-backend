@@ -14,6 +14,10 @@ async function listUsers(req, res) {
 
     if (role) where.role = role;
     if (club_id) where.club_id = club_id;
+    // Admin club : uniquement les joueurs de son club
+    if (req.user.role === 'admin' && req.user.club_id) {
+      where.club_id = req.user.club_id;
+    }
     if (active !== undefined) where.is_active = active === 'true';
 
     if (search) {
@@ -105,8 +109,12 @@ async function updateUser(req, res) {
     const isSelf = req.user.id === user.id;
     const isPlatine = req.user.role === 'platine_admin';
     const isSuperAdmin = req.user.role === 'super_admin' || isPlatine;
+    const isClubAdmin =
+      req.user.role === 'admin' &&
+      req.user.club_id &&
+      user.club_id === req.user.club_id;
 
-    if (!isSelf && !isSuperAdmin) {
+    if (!isSelf && !isSuperAdmin && !isClubAdmin) {
       return res.status(403).json({ error: 'Permissions insuffisantes' });
     }
 
