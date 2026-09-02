@@ -5,6 +5,8 @@ const ctrl = require('../controllers/chatController');
 
 router.use(authenticate);
 router.get('/rooms', ctrl.listRooms);
+router.get('/unread', ctrl.unread);
+router.post('/read', ctrl.markRead);
 router.get('/messages', ctrl.listMessages);
 router.post('/messages', ctrl.postMessage);
 router.delete('/messages/:id', ctrl.hideMessage);
