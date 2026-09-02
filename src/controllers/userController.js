@@ -149,7 +149,27 @@ async function updateUser(req, res) {
       }
     }
 
+    const prevIndex = Number(user.index_value);
+    if (allowed.index_value !== undefined) {
+      allowed.index_value = Math.round(Number(allowed.index_value) * 10) / 10;
+    }
     await user.update(allowed);
+    if (
+      allowed.index_value !== undefined &&
+      Number(allowed.index_value) !== prevIndex
+    ) {
+      try {
+        await IndexHistory.create({
+          user_id: user.id,
+          old_index: prevIndex,
+          new_index: allowed.index_value,
+          change: Math.round((allowed.index_value - prevIndex) * 10) / 10,
+          reason: 'manual',
+        });
+      } catch (e) {
+        console.warn('index history', e.message);
+      }
+    }
 
     res.json({
       user: user.toSafeJSON(),
