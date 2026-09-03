@@ -535,9 +535,9 @@ async function drawBracket(req, res) {
       return res.status(400).json({ error: 'Tableau déjà généré' });
     }
 
-    const raw = [...(c.entrants || [])];
+    const raw = [...new Set((c.entrants || []).filter(Boolean))];
     if (raw.length < 2) {
-      return res.status(400).json({ error: 'Au moins 2 inscrits' });
+      return res.status(400).json({ error: 'Au moins 2 inscrits (doublons retirés)' });
     }
 
     // Charger les index pour classer les inscrits (plus bas = meilleur)
@@ -562,11 +562,16 @@ async function drawBracket(req, res) {
 
     const n = sorted.length;
     const size = nextPowerOf2(n);
-    const byesCount = size - n;
-    // Byes = les meilleurs (masters / petits index) — quasi sûrs de passer le 1er tour
-    const byePlayers = sorted.slice(0, byesCount);
-    // Les autres jouent le 1er tour (tirage au sort entre eux pour les duels)
-    const playing = shuffle(sorted.slice(byesCount));
+    const byesCountWanted = size - n;
+    // Byes = les meilleurs (petits index). Les plus hauts index jouent le 1er tour.
+    const byePlayers = sorted.slice(0, byesCountWanted);
+    let playing = sorted.slice(byesCountWanted);
+    // Si nombre impair de joueurs au 1er tour, le moins fort des byes descend jouer
+    // (évite un match fantôme / un joueur contre lui-même).
+    while (playing.length % 2 === 1 && byePlayers.length) {
+      playing.push(byePlayers.pop());
+    }
+    playing = shuffle(playing);
 
     const created = [];
     let slot = 0;
@@ -599,6 +604,7 @@ async function drawBracket(req, res) {
     for (let i = 0; i < playing.length; i += 2) {
       const a = playing[i];
       const b = playing[i + 1];
+      if (!a || !b || a === b) continue;
       const key = c.format === 'home_away' ? seriesKey(c.id, size, slot) : null;
       const m = await MatchPlayMatch.create({
         championship_id: c.id,
@@ -619,7 +625,8 @@ async function drawBracket(req, res) {
 
     await c.update({ status: 'in_progress' });
 
-    const realMatches = playing.length / 2;
+    const byesCount = byePlayers.length;
+    const realMatches = Math.floor(playing.length / 2);
     res.json({
       message: `Tirage OK — tableau ${size} : ${realMatches} match(s) + ${byesCount} bye(s) → ${size / 2} qualifiés`,
       matches_created: created.length,
@@ -628,7 +635,7 @@ async function drawBracket(req, res) {
       first_round_matches: realMatches,
       warning:
         byesCount > 0
-          ? `${byesCount} bye(s) attribués aux meilleurs index (les plus bas). Ils passent directement au tour suivant.`
+          ? `${byesCount} bye(s) aux meilleurs index. Les plus hauts index jouent le 1er tour.`
           : null,
     });
   } catch (err) {
