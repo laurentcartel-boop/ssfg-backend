@@ -18,7 +18,8 @@ async function listUsers(req, res) {
     if (req.user.role === 'admin' && req.user.club_id) {
       where.club_id = req.user.club_id;
     }
-    if (active !== undefined) where.is_active = active === 'true';
+    if (active === 'false') where.is_active = false;
+    else if (active !== 'all') where.is_active = true;
 
     if (search) {
       where[Op.or] = [
@@ -205,9 +206,50 @@ async function listClubs(req, res) {
   }
 }
 
+/**
+ * DELETE /api/users/:id
+ * Platine / super-admin uniquement.
+ * Si le joueur a déjà des parties → désactivation (historique conservé).
+ * Sinon suppression définitive.
+ */
+async function deleteUser(req, res) {
+  try {
+    if (!['platine_admin', 'super_admin'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Seul un Admin Platine peut supprimer un joueur' });
+    }
+    if (String(req.params.id) === String(req.user.id)) {
+      return res.status(400).json({ error: 'Tu ne peux pas supprimer ton propre compte' });
+    }
+    const user = await User.findByPk(req.params.id);
+    if (!user) return res.status(404).json({ error: 'Joueur introuvable' });
+    if (user.role === 'platine_admin' && req.user.role !== 'platine_admin') {
+      return res.status(403).json({ error: 'Impossible de supprimer un Admin Platine' });
+    }
+
+    const { RoundPlayer } = require('../models');
+    const played = await RoundPlayer.count({ where: { user_id: user.id } });
+    if (played > 0) {
+      await user.update({
+        is_active: false,
+        email: `deleted_${Date.now()}_${user.email}`,
+      });
+      return res.json({
+        message: `${user.first_name} ${user.last_name} désactivé (${played} partie(s) conservées)`,
+        soft: true,
+      });
+    }
+    await user.destroy();
+    res.json({ message: `${user.first_name} ${user.last_name} supprimé`, soft: false });
+  } catch (err) {
+    console.error('deleteUser', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
 module.exports = {
   listClubs,
   listUsers,
   getUser,
   updateUser,
+  deleteUser,
 };
