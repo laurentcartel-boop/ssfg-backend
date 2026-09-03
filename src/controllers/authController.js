@@ -58,6 +58,8 @@ async function register(req, res) {
       gender,
       birth_date,
       is_rookie = false,
+      club_id,
+      index_value,
     } = req.body;
 
     if (!email || !password || !first_name || !last_name) {
@@ -76,6 +78,21 @@ async function register(req, res) {
       return res.status(409).json({ error: 'Cet email est déjà utilisé' });
     }
 
+    const sameName = await User.findOne({
+      where: {
+        first_name: first_name.trim(),
+        last_name: last_name.trim(),
+        is_active: true,
+      },
+    });
+    if (sameName && !req.body.force) {
+      return res.status(409).json({
+        error: `Un joueur « ${first_name.trim()} ${last_name.trim()} » existe déjà (${sameName.email}). Coche « forcer » si ce n’est pas un doublon.`,
+        existing_id: sameName.id,
+      });
+    }
+
+    const idx = Number(index_value);
     const user = await User.create({
       email: email.toLowerCase().trim(),
       password_hash: password,
@@ -85,7 +102,8 @@ async function register(req, res) {
       gender: gender || null,
       birth_date: birth_date || null,
       is_rookie: Boolean(is_rookie),
-      index_value: 1.0,
+      club_id: club_id || null,
+      index_value: Number.isFinite(idx) ? idx : 1.0,
       is_active: true,
       must_change_password: true,
     });
