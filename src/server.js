@@ -137,11 +137,8 @@ async function start() {
         if (sid) {
           await sequelize.query('UPDATE accounting_entries SET club_id = :sid WHERE club_id IS NULL', { replacements: { sid } });
           await sequelize.query('UPDATE invoices SET club_id = :sid WHERE club_id IS NULL', { replacements: { sid } });
-          console.log('ecritures et factures existantes -> SSFG');
         }
-      } catch (e) {
-        console.warn('migrate club_id', e.message);
-      }
+      } catch (e) {}
       await promotePlatine();
     } catch (syncErr) {
       console.error('sequelize.sync:', syncErr);
@@ -155,10 +152,16 @@ async function start() {
       'ALTER TABLE rounds ADD COLUMN investigation_note VARCHAR(255) NULL',
       "ALTER TABLE users MODIFY COLUMN role ENUM('joueur','admin','super_admin','platine_admin') NOT NULL DEFAULT 'joueur'",
       'ALTER TABLE rounds ADD COLUMN scoring_user_id CHAR(36) NULL',
+      'ALTER TABLE article_comments ADD COLUMN approved TINYINT(1) NOT NULL DEFAULT 0',
+      'ALTER TABLE article_comments ADD COLUMN author_name VARCHAR(80) NULL',
+      'ALTER TABLE article_comments MODIFY user_id CHAR(36) NULL',
     ];
     for (const sql of more) {
       try { await sequelize.query(sql); } catch (e) {}
     }
+    try {
+      await sequelize.query('UPDATE article_comments SET approved = 1 WHERE user_id IS NOT NULL');
+    } catch (e) {}
     app.listen(PORT, () => {
       console.log('Serveur demarre sur le port', PORT);
     });
