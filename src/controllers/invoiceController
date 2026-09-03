@@ -1,15 +1,45 @@
 const { Op } = require('sequelize');
-const { Invoice } = require('../models');
+const { Invoice, Club } = require('../models');
 
-const CLUB = {
-  name: 'Saint-Saëns FootGolf — SSFG',
-  address: '35 Rue Simone Veilles',
-  zip: '76680',
-  city: 'Saint-Saëns',
-  country: 'France',
-  full_address: 'SSFG — 35 Rue Simone Veilles, 76680 Saint-Saëns',
-  legal: 'Association loi 1901 — TVA non applicable, art. 293 B du CGI',
+const LETTERHEAD = {
+  SSFG: {
+    name: 'Saint-Saëns FootGolf — SSFG',
+    address: '35 Rue Simone Veilles',
+    zip: '76680',
+    city: 'Saint-Saëns',
+    country: 'France',
+    full_address: 'SSFG — 35 Rue Simone Veilles, 76680 Saint-Saëns',
+    legal: 'Association loi 1901 — TVA non applicable, art. 293 B du CGI',
+  },
 };
+
+function letterheadFor(club) {
+  if (!club) return { ...CLUB };
+  const known = LETTERHEAD[club.code];
+  if (known) return known;
+  return {
+    name: club.name || club.short_name || club.code,
+    address: '',
+    zip: '',
+    city: '',
+    country: 'France',
+    full_address: club.name || club.code,
+    legal: 'Association loi 1901 — TVA non applicable, art. 293 B du CGI',
+  };
+}
+
+async function resolveClubId(user) {
+  if (user?.club_id) return user.club_id;
+  const ssfg = await Club.findOne({ where: { code: 'SSFG' } });
+  return ssfg ? ssfg.id : null;
+}
+
+async function loadClub(clubId) {
+  if (!clubId) return null;
+  return Club.findByPk(clubId);
+}
+
+const CLUB = LETTERHEAD.SSFG;
 
 function calcTotal(lines) {
   if (!Array.isArray(lines)) return 0;
@@ -20,7 +50,7 @@ function calcTotal(lines) {
   }, 0);
 }
 
-function serialize(inv) {
+function serialize(inv, clubRow) {
   return {
     id: inv.id,
     doc_type: inv.doc_type,
@@ -38,32 +68,38 @@ function serialize(inv) {
     notes: inv.notes,
     status: inv.status,
     created_at: inv.createdAt,
-    club: CLUB,
+    club: letterheadFor(clubRow),
+    club_id: inv.club_id || null,
   };
 }
 
-async function nextNumber(year, doc_type) {
+async function nextNumber(year, doc_type, clubId) {
   const prefix = `${year}-`;
-  const last = await Invoice.findOne({
-    where: {
-      year,
-      number: { [Op.like]: `${prefix}%` },
-    },
-    order: [['number', 'DESC']],
-  });
+  const where = { year, number: { [Op.like]: `${prefix}%` } };
+  if (clubId) where.club_id = clubId;
+  const last = await Invoice.findOne({ where, order: [['number', 'DESC']] });
   let seq = 1;
   if (last?.number) {
-    const part = String(last.number).split('-')[1];
-    const n = parseInt(part, 10);
+    const n = parseInt(String(last.number).split('-')[1], 10);
     if (!Number.isNaN(n)) seq = n + 1;
   }
-  // Format 2026-0001
   return `${year}-${String(seq).padStart(4, '0')}`;
+}
+
+async function assertClub(inv, clubId) {
+  if (clubId && inv.club_id && inv.club_id !== clubId) {
+    const err = new Error('Document d\u2019un autre club');
+    err.status = 403;
+    throw err;
+  }
 }
 
 async function listInvoices(req, res) {
   try {
+    const clubId = await resolveClubId(req.user);
+    const clubRow = await loadClub(clubId);
     const where = {};
+    if (clubId) where.club_id = clubId;
     if (req.query.year) where.year = parseInt(req.query.year, 10);
     if (req.query.doc_type) where.doc_type = String(req.query.doc_type).toUpperCase();
     const list = await Invoice.findAll({
@@ -71,7 +107,7 @@ async function listInvoices(req, res) {
       order: [['issue_date', 'DESC'], ['number', 'DESC']],
       limit: 200,
     });
-    res.json({ invoices: list.map(serialize), club: CLUB });
+    res.json({ invoices: list.map((inv) => serialize(inv, clubRow)), club: letterheadFor(clubRow) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -80,9 +116,14 @@ async function listInvoices(req, res) {
 
 async function getInvoice(req, res) {
   try {
+    const clubId = await resolveClubId(req.user);
     const inv = await Invoice.findByPk(req.params.id);
     if (!inv) return res.status(404).json({ error: 'Document introuvable' });
-    res.json({ invoice: serialize(inv), club: CLUB });
+    if (clubId && inv.club_id && inv.club_id !== clubId) {
+      return res.status(403).json({ error: 'Document d\u2019un autre club' });
+    }
+    const clubRow = await loadClub(inv.club_id || clubId);
+    res.json({ invoice: serialize(inv, clubRow), club: letterheadFor(clubRow) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -98,14 +139,13 @@ async function createInvoice(req, res) {
     }
     const client_name = String(body.client_name || '').trim();
     if (!client_name) return res.status(400).json({ error: 'Nom client obligatoire' });
-
     const issue_date = body.issue_date || new Date().toISOString().slice(0, 10);
     const year = parseInt(String(issue_date).slice(0, 4), 10) || new Date().getFullYear();
-    const number = await nextNumber(year, doc_type);
-
+    const clubId = await resolveClubId(req.user);
+    const clubRow = await loadClub(clubId);
+    const number = await nextNumber(year, doc_type, clubId);
     const lines = Array.isArray(body.lines) ? body.lines : [];
     const total_amount = Math.round(calcTotal(lines) * 100) / 100;
-
     const inv = await Invoice.create({
       doc_type,
       number,
@@ -122,9 +162,9 @@ async function createInvoice(req, res) {
       notes: body.notes || null,
       status: body.status || 'draft',
       created_by: req.user?.id || null,
+      club_id: clubId,
     });
-
-    res.status(201).json({ invoice: serialize(inv), club: CLUB });
+    res.status(201).json({ invoice: serialize(inv, clubRow), club: letterheadFor(clubRow) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -133,21 +173,15 @@ async function createInvoice(req, res) {
 
 async function updateInvoice(req, res) {
   try {
+    const clubId = await resolveClubId(req.user);
     const inv = await Invoice.findByPk(req.params.id);
     if (!inv) return res.status(404).json({ error: 'Document introuvable' });
+    if (clubId && inv.club_id && inv.club_id !== clubId) {
+      return res.status(403).json({ error: 'Document d\u2019un autre club' });
+    }
     const body = req.body || {};
     const fields = {};
-    for (const k of [
-      'client_name',
-      'client_address',
-      'client_email',
-      'client_phone',
-      'service_type',
-      'description',
-      'notes',
-      'status',
-      'issue_date',
-    ]) {
+    for (const k of ['client_name','client_address','client_email','client_phone','service_type','description','notes','status','issue_date']) {
       if (body[k] !== undefined) fields[k] = body[k];
     }
     if (body.doc_type && ['DEVIS', 'FACTURE'].includes(String(body.doc_type).toUpperCase())) {
@@ -158,7 +192,8 @@ async function updateInvoice(req, res) {
       fields.total_amount = Math.round(calcTotal(body.lines) * 100) / 100;
     }
     await inv.update(fields);
-    res.json({ invoice: serialize(inv), club: CLUB });
+    const clubRow = await loadClub(inv.club_id || clubId);
+    res.json({ invoice: serialize(inv, clubRow), club: letterheadFor(clubRow) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -167,8 +202,12 @@ async function updateInvoice(req, res) {
 
 async function deleteInvoice(req, res) {
   try {
+    const clubId = await resolveClubId(req.user);
     const inv = await Invoice.findByPk(req.params.id);
     if (!inv) return res.status(404).json({ error: 'Document introuvable' });
+    if (clubId && inv.club_id && inv.club_id !== clubId) {
+      return res.status(403).json({ error: 'Document d\u2019un autre club' });
+    }
     await inv.destroy();
     res.json({ message: 'Document supprimé' });
   } catch (err) {
@@ -179,14 +218,18 @@ async function deleteInvoice(req, res) {
 
 async function convertToInvoice(req, res) {
   try {
+    const clubId = await resolveClubId(req.user);
     const devis = await Invoice.findByPk(req.params.id);
     if (!devis) return res.status(404).json({ error: 'Devis introuvable' });
+    if (clubId && devis.club_id && devis.club_id !== clubId) {
+      return res.status(403).json({ error: 'Document d\u2019un autre club' });
+    }
     if (devis.doc_type !== 'DEVIS') {
       return res.status(400).json({ error: 'Seul un devis peut être converti' });
     }
     const issue_date = new Date().toISOString().slice(0, 10);
     const year = parseInt(issue_date.slice(0, 4), 10);
-    const number = await nextNumber(year, 'FACTURE');
+    const number = await nextNumber(year, 'FACTURE', clubId);
     const inv = await Invoice.create({
       doc_type: 'FACTURE',
       number,
@@ -203,9 +246,11 @@ async function convertToInvoice(req, res) {
       notes: devis.notes,
       status: 'draft',
       created_by: req.user?.id || null,
+      club_id: clubId || devis.club_id,
     });
     await devis.update({ status: 'accepted' });
-    res.status(201).json({ invoice: serialize(inv), club: CLUB });
+    const clubRow = await loadClub(clubId || devis.club_id);
+    res.status(201).json({ invoice: serialize(inv, clubRow), club: letterheadFor(clubRow) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur serveur' });
