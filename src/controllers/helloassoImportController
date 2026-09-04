@@ -217,11 +217,13 @@ async function importHelloAsso(req, res) {
       competition_id,
       marcassins_id,
       target,
+      players_only = false,
       dry_run = false,
       rows: rawRows = [],
       file_base64,
     } = req.body;
     const isMarcassins = target === 'marcassins' || !!marcassins_id;
+    const playersOnly = players_only === true || target === 'players';
 
     if ((!Array.isArray(rawRows) || rawRows.length === 0) && file_base64) {
       try {
@@ -244,7 +246,7 @@ async function importHelloAsso(req, res) {
     if (!Array.isArray(rawRows) || rawRows.length === 0) {
       return res.status(400).json({ error: 'Aucune ligne à importer' });
     }
-    if (!dry_run && !isMarcassins) {
+    if (!dry_run && !isMarcassins && !playersOnly) {
       if (!name || !course_id || !date) {
         return res.status(400).json({
           error: 'name, course_id et date obligatoires (sauf dry_run)',
@@ -427,6 +429,20 @@ async function importHelloAsso(req, res) {
         email: user.email,
       });
       p.user_id = user.id;
+    }
+
+    if (playersOnly) {
+      const player_ids = preview.map((p) => p.user_id).filter(Boolean);
+      return res.status(201).json({
+        message: 'Joueurs HelloAsso à jour — choisis la formule ensuite',
+        players_only: true,
+        player_ids,
+        created_count: created.length,
+        existing_count: linked.length,
+        created,
+        existing: linked,
+        temp_password: tempPassword,
+      });
     }
 
     if (isMarcassins && !dry_run) {
