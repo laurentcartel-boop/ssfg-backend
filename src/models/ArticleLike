@@ -10,7 +10,8 @@ const ArticleLike = sequelize.define(
       primaryKey: true,
     },
     article_id: { type: DataTypes.UUID, allowNull: false },
-    user_id: { type: DataTypes.UUID, allowNull: false },
+    user_id: { type: DataTypes.UUID, allowNull: true },
+    guest_key: { type: DataTypes.STRING(64), allowNull: true },
   },
   {
     tableName: 'article_likes',
