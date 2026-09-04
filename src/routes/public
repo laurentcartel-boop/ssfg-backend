@@ -131,19 +131,30 @@ router.get('/live', async (req, res) => {
         order: [['createdAt', 'DESC']],
       });
       for (const c of champs) {
-        const openMatches = await MatchPlayMatch.count({
+        const liveMs = await MatchPlayMatch.findAll({
           where: {
             championship_id: c.id,
             is_bye: false,
             status: 'in_progress',
           },
+          include: [
+            { model: User, as: 'playerA', attributes: ['id', 'first_name', 'last_name'] },
+            { model: User, as: 'playerB', attributes: ['id', 'first_name', 'last_name'] },
+          ],
         });
-        if (openMatches === 0) continue;
+        if (!liveMs.length) continue;
         matchplay.push({
           id: c.id,
           name: c.name,
           format: c.format,
-          matches_open: openMatches,
+          matches_open: liveMs.length,
+          matches: liveMs.map((m) => ({
+            id: m.id,
+            holes_won_a: m.holes_won_a,
+            holes_won_b: m.holes_won_b,
+            playerA: m.playerA,
+            playerB: m.playerB,
+          })),
         });
       }
     } catch (e) {
