@@ -15,6 +15,7 @@ const ArticleComment = sequelize.define(
     body: { type: DataTypes.STRING(500), allowNull: false },
     hidden: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     approved: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    parent_id: { type: DataTypes.UUID, allowNull: true },
   },
   { tableName: 'article_comments' }
 );
