@@ -135,9 +135,10 @@ router.get('/live', async (req, res) => {
           where: {
             championship_id: c.id,
             is_bye: false,
-            status: { [Op.in]: ['pending', 'in_progress'] },
+            status: 'in_progress',
           },
         });
+        if (openMatches === 0) continue;
         matchplay.push({
           id: c.id,
           name: c.name,
