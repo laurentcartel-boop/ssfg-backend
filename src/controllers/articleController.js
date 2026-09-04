@@ -149,11 +149,20 @@ async function toggleLike(req, res) {
   try {
     const { ArticleLike } = require('../models');
     const article_id = req.params.id;
-    const user_id = req.user.id;
-    const existing = await ArticleLike.findOne({ where: { article_id, user_id } });
+    const user_id = req.user?.id || null;
+    const guest_key = String(req.body.guest_key || '').slice(0, 64) || null;
+    if (!user_id && !guest_key) {
+      return res.status(400).json({ error: 'Connexion ou jeton visiteur manquant' });
+    }
+    const existing = user_id
+      ? await ArticleLike.findOne({ where: { article_id, user_id } })
+      : await ArticleLike.findOne({ where: { article_id, guest_key } });
     if (existing) await existing.destroy();
-    else await ArticleLike.create({ article_id, user_id });
+    else await ArticleLike.create({ article_id, user_id, guest_key: user_id ? null : guest_key });
     const data = await engagement(article_id, user_id);
+    if (!user_id) {
+      data.liked = !existing;
+    }
     res.json(data);
   } catch (err) {
     console.error(err);
@@ -262,7 +271,8 @@ async function moderateComment(req, res) {
     const action = String(req.body.action || '').toLowerCase();
     if (action === 'approve') await row.update({ approved: true, hidden: false });
     else if (action === 'reject') await row.update({ approved: false, hidden: true });
-    else return res.status(400).json({ error: 'action approve ou reject' });
+    else if (action === 'delete') await row.destroy();
+    else return res.status(400).json({ error: 'action approve, reject ou delete' });
     res.json({ ok: true, id: row.id, approved: row.approved, hidden: row.hidden });
   } catch (err) {
     console.error(err);
