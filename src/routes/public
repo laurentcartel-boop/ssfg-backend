@@ -161,6 +161,26 @@ router.get('/live', async (req, res) => {
       console.warn('public live matchplay', e.message);
     }
 
+    const mpAsRounds = [];
+    for (const mp of matchplay) {
+      for (const m of mp.matches || []) {
+        const na = m.playerA
+          ? `${String(m.playerA.last_name || '').toUpperCase()}.${String(m.playerA.first_name || ' ').charAt(0)}`
+          : '—';
+        const nb = m.playerB
+          ? `${String(m.playerB.last_name || '').toUpperCase()}.${String(m.playerB.first_name || ' ').charAt(0)}`
+          : '—';
+        mpAsRounds.push({
+          id: m.id,
+          name: `${na} vs ${nb}`,
+          type: 'matchplay',
+          date: new Date().toISOString().slice(0, 10),
+          course: { short_name: mp.name || 'Match Play' },
+          players_count: 2,
+        });
+      }
+    }
+
     res.json({
       has_live:
         liveRounds.length > 0 ||
@@ -168,7 +188,7 @@ router.get('/live', async (req, res) => {
         liveSquads.length > 0 ||
         marcassins.length > 0 ||
         matchplay.length > 0,
-      rounds: liveRounds,
+      rounds: [...liveRounds, ...mpAsRounds],
       competition_squads: liveSquads,
       competitions: liveComps,
       marcassins,
@@ -199,7 +219,69 @@ router.get('/rounds/:id', async (req, res) => {
         },
       ],
     });
-    if (!round) return res.status(404).json({ error: 'Partie non trouvée' });
+    if (!round) {
+      try {
+        const { MatchPlayMatch, MatchPlayChampionship } = require('../models');
+        const m = await MatchPlayMatch.findByPk(req.params.id, {
+          include: [
+            { model: User, as: 'playerA', attributes: ['id', 'first_name', 'last_name'] },
+            { model: User, as: 'playerB', attributes: ['id', 'first_name', 'last_name'] },
+            { model: MatchPlayChampionship, as: 'championship', attributes: ['id', 'name'] },
+          ],
+        });
+        if (m && m.playerA && m.playerB) {
+          const holesA = [];
+          const holesB = [];
+          for (const h of m.holes_data || []) {
+            if (h.result === 'a') {
+              holesA.push({ hole_number: h.hole, score: 1 });
+              holesB.push({ hole_number: h.hole, score: 0 });
+            } else if (h.result === 'b') {
+              holesA.push({ hole_number: h.hole, score: 0 });
+              holesB.push({ hole_number: h.hole, score: 1 });
+            } else if (h.result === 'half') {
+              holesA.push({ hole_number: h.hole, score: 1 });
+              holesB.push({ hole_number: h.hole, score: 1 });
+            }
+          }
+          const na = `${String(m.playerA.last_name || '').toUpperCase()}.${String(m.playerA.first_name || ' ').charAt(0)}`;
+          const nb = `${String(m.playerB.last_name || '').toUpperCase()}.${String(m.playerB.first_name || ' ').charAt(0)}`;
+          return res.json({
+            round: {
+              id: m.id,
+              name: `${na} vs ${nb}`,
+              type: 'matchplay',
+              date: new Date().toISOString().slice(0, 10),
+              status: m.status,
+              course: {
+                name: m.championship?.name || 'Match Play',
+                short_name: 'MP',
+                holes_data: Array.from({ length: 18 }, (_, i) => ({ hole: i + 1, par: 1 })),
+              },
+              players: [
+                {
+                  id: m.player_a_id,
+                  user_id: m.player_a_id,
+                  user: m.playerA,
+                  holeScores: holesA,
+                  total_score: m.holes_won_a,
+                },
+                {
+                  id: m.player_b_id,
+                  user_id: m.player_b_id,
+                  user: m.playerB,
+                  holeScores: holesB,
+                  total_score: m.holes_won_b,
+                },
+              ],
+            },
+          });
+        }
+      } catch (e) {
+        console.warn('public mp as round', e.message);
+      }
+      return res.status(404).json({ error: 'Partie non trouvée' });
+    }
 
     res.json({
       round: {
