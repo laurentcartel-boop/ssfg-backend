@@ -9,6 +9,8 @@ router.get('/matches', ctrl.listMatches);
 router.get('/matches/:id', ctrl.getMatch);
 router.post('/matches', ctrl.createLibreMatch);
 router.put('/matches/:id/holes', ctrl.updateMatchHoles);
+router.post('/matches/:id/start', ctrl.startMatch);
+router.post('/matches/:id/forfeit', requireRole('admin', 'super_admin', 'platine_admin'), ctrl.forfeitMatch);
 router.post('/matches/:id/close', ctrl.closeMatch);
 
 router.get('/championships', ctrl.listChampionships);
