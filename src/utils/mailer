@@ -1,0 +1,68 @@
+const nodemailer = require('nodemailer');
+
+function enabled() {
+  return !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+}
+
+function transporter() {
+  const port = Number(process.env.SMTP_PORT || 465);
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port,
+    secure: port === 465,
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+}
+
+function fromAddr() {
+  return process.env.SMTP_FROM || process.env.SMTP_USER;
+}
+
+async function sendMail({ to, subject, text, html }) {
+  if (!enabled()) {
+    console.warn('Mail non configuré (SMTP_HOST / USER / PASS)');
+    return { skipped: true };
+  }
+  const list = (Array.isArray(to) ? to : [to]).filter(Boolean);
+  if (!list.length) return { skipped: true };
+  await transporter().sendMail({
+    from: `SSFG <${fromAddr()}>`,
+    to: list.join(', '),
+    subject,
+    text,
+    html: html || text.replace(/\n/g, '<br>'),
+  });
+  return { ok: true };
+}
+
+async function notifyPendingComment({ articleTitle, author, excerpt }) {
+  const { User } = require('../models');
+  const { Op } = require('sequelize');
+  const mods = await User.findAll({
+    where: { role: { [Op.in]: ['platine_admin', 'super_admin'] }, is_active: true },
+    attributes: ['email', 'first_name', 'last_name', 'role'],
+  });
+  const extra = String(process.env.MAIL_NOTIFY || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const to = [...new Set([...mods.map((u) => u.email).filter(Boolean), ...extra])];
+  if (!to.length) return { skipped: true };
+  const subject = 'SSFG — commentaire à valider';
+  const text = [
+    'Un commentaire attend ta validation.',
+    '',
+    `Article : ${articleTitle || '—'}`,
+    `Auteur : ${author || 'Visiteur'}`,
+    `Texte : ${excerpt || ''}`,
+    '',
+    'Ouvre le scoring → Actualités (pastille) pour approuver ou refuser.',
+    'https://ssfg.fr/scoring',
+  ].join('\n');
+  return sendMail({ to, subject, text });
+}
+
+module.exports = { enabled, sendMail, notifyPendingComment };
