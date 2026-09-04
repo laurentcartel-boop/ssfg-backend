@@ -123,16 +123,44 @@ router.get('/live', async (req, res) => {
       console.warn('public live marcassins', e.message);
     }
 
+    let matchplay = [];
+    try {
+      const { MatchPlayChampionship, MatchPlayMatch, User } = require('../models');
+      const champs = await MatchPlayChampionship.findAll({
+        where: { status: 'in_progress' },
+        order: [['createdAt', 'DESC']],
+      });
+      for (const c of champs) {
+        const openMatches = await MatchPlayMatch.count({
+          where: {
+            championship_id: c.id,
+            is_bye: false,
+            status: { [Op.in]: ['pending', 'in_progress'] },
+          },
+        });
+        matchplay.push({
+          id: c.id,
+          name: c.name,
+          format: c.format,
+          matches_open: openMatches,
+        });
+      }
+    } catch (e) {
+      console.warn('public live matchplay', e.message);
+    }
+
     res.json({
       has_live:
         liveRounds.length > 0 ||
         liveComps.length > 0 ||
         liveSquads.length > 0 ||
-        marcassins.length > 0,
+        marcassins.length > 0 ||
+        matchplay.length > 0,
       rounds: liveRounds,
       competition_squads: liveSquads,
       competitions: liveComps,
       marcassins,
+      matchplay,
     });
   } catch (err) {
     console.error('public live error:', err);
@@ -345,6 +373,54 @@ router.post('/rounds/:id/comments', async (req, res) => {
 });
 
 /** Suppression publique par token simple non — géré côté auth rounds */
+
+router.get('/matchplay/:id', async (req, res) => {
+  try {
+    const { MatchPlayChampionship, MatchPlayMatch, User } = require('../models');
+    const c = await MatchPlayChampionship.findByPk(req.params.id, {
+      include: [
+        {
+          model: MatchPlayMatch,
+          as: 'matches',
+          include: [
+            { model: User, as: 'playerA', attributes: ['id', 'first_name', 'last_name'] },
+            { model: User, as: 'playerB', attributes: ['id', 'first_name', 'last_name'] },
+            { model: User, as: 'winner', attributes: ['id', 'first_name', 'last_name'] },
+          ],
+        },
+      ],
+    });
+    if (!c) return res.status(404).json({ error: 'Championnat introuvable' });
+    if (!['in_progress', 'closed'].includes(c.status)) {
+      return res.status(404).json({ error: 'Tableau pas encore public' });
+    }
+    res.json({
+      championship: {
+        id: c.id,
+        name: c.name,
+        status: c.status,
+        format: c.format,
+      },
+      matches: (c.matches || []).map((m) => ({
+        id: m.id,
+        round_size: m.round_size,
+        bracket_slot: m.bracket_slot,
+        leg: m.leg,
+        status: m.status,
+        is_bye: m.is_bye,
+        holes_won_a: m.holes_won_a,
+        holes_won_b: m.holes_won_b,
+        holes_data: m.holes_data || [],
+        playerA: m.playerA,
+        playerB: m.playerB,
+        winner: m.winner,
+      })),
+    });
+  } catch (err) {
+    console.error('public matchplay', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
 
 module.exports = router;
 
