@@ -194,6 +194,65 @@ async function createLibreMatch(req, res) {
   }
 }
 
+async function startMatch(req, res) {
+  try {
+    const match = await MatchPlayMatch.findByPk(req.params.id);
+    if (!match) return res.status(404).json({ error: 'Match introuvable' });
+    if (match.is_bye) return res.status(400).json({ error: 'Bye — pas de live' });
+    if (match.status === 'closed') return res.status(400).json({ error: 'Match déjà terminé' });
+    if (!match.player_a_id || !match.player_b_id) {
+      return res.status(400).json({ error: 'Adversaire pas encore connu' });
+    }
+    await match.update({ status: 'in_progress' });
+    const full = await MatchPlayMatch.findByPk(match.id, {
+      include: [
+        { model: User, as: 'playerA', attributes: ['id', 'first_name', 'last_name'] },
+        { model: User, as: 'playerB', attributes: ['id', 'first_name', 'last_name'] },
+      ],
+    });
+    res.json({ match: full, message: 'Live lancé — visible sur Parties et ssfg.fr/live' });
+  } catch (err) {
+    console.error('startMatch', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+/** Hors délai / forfait. winner_id = vainqueur par forfait. Sans winner_id = les deux éliminés. */
+async function forfeitMatch(req, res) {
+  try {
+    const match = await MatchPlayMatch.findByPk(req.params.id, {
+      include: [{ model: MatchPlayChampionship, as: 'championship' }],
+    });
+    if (!match) return res.status(404).json({ error: 'Match introuvable' });
+    if (match.status === 'closed') return res.status(400).json({ error: 'Déjà terminé' });
+    const winnerId = req.body.winner_id || null;
+    if (winnerId && winnerId !== match.player_a_id && winnerId !== match.player_b_id) {
+      return res.status(400).json({ error: 'Vainqueur invalide' });
+    }
+    await match.update({
+      status: 'closed',
+      winner_id: winnerId,
+      holes_won_a: winnerId === match.player_a_id ? 10 : 0,
+      holes_won_b: winnerId === match.player_b_id ? 10 : 0,
+    });
+    if (winnerId && match.championship) {
+      await advanceWinner(
+        match.championship,
+        match.round_size,
+        match.bracket_slot,
+        winnerId,
+        req.user.id
+      );
+    }
+    res.json({
+      message: winnerId ? 'Forfait enregistré — vainqueur qualifié' : 'Hors délai — les deux éliminés',
+    });
+  } catch (err) {
+    console.error('forfeitMatch', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
 async function updateMatchHoles(req, res) {
   try {
     const match = await MatchPlayMatch.findByPk(req.params.id);
@@ -707,4 +766,6 @@ module.exports = {
   closeChampionship,
   deleteChampionship,
   deleteMatch,
+  startMatch,
+  forfeitMatch,
 };
