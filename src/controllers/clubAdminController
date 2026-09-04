@@ -32,4 +32,64 @@ async function listLogs(req, res) {
   }
 }
 
-module.exports = { listLogs };
+async function mailStatus(req, res) {
+  try {
+    const { enabled } = require('../utils/mailer');
+    const configured = enabled();
+    let verify = null;
+    if (configured) {
+      try {
+        const nodemailer = require('nodemailer');
+        const port = Number(process.env.SMTP_PORT || 587);
+        const t = nodemailer.createTransport({
+          host: process.env.SMTP_HOST,
+          port,
+          secure: port === 465,
+          requireTLS: port === 587,
+          auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+          connectionTimeout: 12000,
+          tls: { rejectUnauthorized: false },
+        });
+        await t.verify();
+        verify = 'ok';
+      } catch (e) {
+        verify = e.message || 'échec';
+      }
+    }
+    res.json({
+      configured,
+      host: process.env.SMTP_HOST || null,
+      port: process.env.SMTP_PORT || null,
+      user: process.env.SMTP_USER || null,
+      from: process.env.SMTP_FROM || process.env.SMTP_USER || null,
+      verify,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function mailTest(req, res) {
+  try {
+    const { sendMail, enabled } = require('../utils/mailer');
+    if (!enabled()) {
+      return res.status(400).json({
+        error:
+          'SMTP non configuré sur Railway. Ajoute SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM.',
+      });
+    }
+    const to = (req.body && req.body.to) || req.user.email;
+    if (!to) return res.status(400).json({ error: 'Aucune adresse destinataire' });
+    await sendMail({
+      to,
+      subject: 'SSFG — test notification',
+      text: `Ceci est un mail de test envoyé depuis l’appli SSFG.\nDestinataire : ${to}\nSi tu lis ceci, le SMTP fonctionne.`,
+    });
+    res.json({ message: `Mail de test envoyé à ${to}` });
+  } catch (err) {
+    console.error('mailTest', err);
+    res.status(500).json({ error: err.message || 'Envoi impossible' });
+  }
+}
+
+module.exports = { listLogs, mailStatus, mailTest };
