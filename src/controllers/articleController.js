@@ -204,6 +204,18 @@ async function addComment(req, res) {
       const data = await engagement(req.params.id, req.user.id);
       return res.status(201).json({ ...data, pending: false, message: 'Commentaire publié' });
     }
+    try {
+      const { Article } = require('../models');
+      const art = await Article.findByPk(req.params.id, { attributes: ['title'] });
+      const { notifyPendingComment } = require('../utils/mailer');
+      notifyPendingComment({
+        articleTitle: art?.title,
+        author: display || 'Visiteur',
+        excerpt: body.slice(0, 200),
+      }).catch((e) => console.warn('mail pending comment', e.message));
+    } catch (e) {
+      console.warn('mail pending comment', e.message);
+    }
     res.status(201).json({
       pending: true,
       message: 'Commentaire envoyé. Il apparaîtra après validation.',
