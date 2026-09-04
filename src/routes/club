@@ -6,5 +6,7 @@ const ctrl = require('../controllers/clubAdminController');
 router.use(authenticate);
 router.use(requireRole('super_admin', 'platine_admin'));
 router.get('/logs', ctrl.listLogs);
+router.get('/mail-status', ctrl.mailStatus);
+router.post('/mail-test', ctrl.mailTest);
 
 module.exports = router;
