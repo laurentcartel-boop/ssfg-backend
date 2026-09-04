@@ -167,6 +167,8 @@ async function start() {
     try { await sequelize.query('ALTER TABLE article_comments ADD COLUMN author_name VARCHAR(80) NULL'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE article_comments ADD COLUMN parent_id CHAR(36) NULL'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE article_comments MODIFY user_id CHAR(36) NULL'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE article_likes ADD COLUMN guest_key VARCHAR(64) NULL'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE article_likes MODIFY user_id CHAR(36) NULL'); } catch (e) {}
     try { await sequelize.query('UPDATE article_comments SET approved = 1 WHERE user_id IS NOT NULL'); } catch (e) {}
     console.log('✅ Connexion base de données OK');
 
