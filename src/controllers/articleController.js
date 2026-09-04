@@ -1,57 +1,69 @@
 const { Article, User } = require('../models');
 
+/** GET /api/articles — public : uniquement publiés */
 async function listPublic(req, res) {
   try {
     const articles = await Article.findAll({
       where: { published: true },
-      include: [{ model: User, as: 'author', attributes: ['id', 'first_name', 'last_name'] }],
+      include: [
+        { model: User, as: 'author', attributes: ['id', 'first_name', 'last_name'] },
+      ],
       order: [['published_at', 'DESC'], ['created_at', 'DESC']],
       limit: 50,
     });
     res.json({ articles });
   } catch (err) {
-    console.error(err);
+    console.error('listPublic articles:', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 }
 
+/** GET /api/articles/:id — public si publié, sinon admin */
 async function getOne(req, res) {
   try {
     const article = await Article.findByPk(req.params.id, {
-      include: [{ model: User, as: 'author', attributes: ['id', 'first_name', 'last_name'] }],
+      include: [
+        { model: User, as: 'author', attributes: ['id', 'first_name', 'last_name'] },
+      ],
     });
     if (!article) return res.status(404).json({ error: 'Article introuvable' });
     if (!article.published) {
       const role = req.user?.role;
-      if (!role || !['admin', 'super_admin', 'platine_admin'].includes(role)) {
+      if (!role || !['admin', 'super_admin'].includes(role)) {
         return res.status(404).json({ error: 'Article introuvable' });
       }
     }
     res.json({ article });
   } catch (err) {
-    console.error(err);
+    console.error('getOne article:', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 }
 
+/** GET /api/articles/admin/all — admin : tous */
 async function listAll(req, res) {
   try {
     const articles = await Article.findAll({
-      include: [{ model: User, as: 'author', attributes: ['id', 'first_name', 'last_name'] }],
+      include: [
+        { model: User, as: 'author', attributes: ['id', 'first_name', 'last_name'] },
+      ],
       order: [['created_at', 'DESC']],
       limit: 100,
     });
     res.json({ articles });
   } catch (err) {
-    console.error(err);
+    console.error('listAll articles:', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 }
 
+/** POST /api/articles — admin */
 async function create(req, res) {
   try {
     const { title, body, excerpt, image_url, published } = req.body;
-    if (!title || !body) return res.status(400).json({ error: 'Titre et texte obligatoires' });
+    if (!title || !body) {
+      return res.status(400).json({ error: 'Titre et texte obligatoires' });
+    }
     const isPub = Boolean(published);
     const article = await Article.create({
       title: title.trim(),
@@ -64,15 +76,17 @@ async function create(req, res) {
     });
     res.status(201).json({ article, message: isPub ? 'Article publié' : 'Brouillon enregistré' });
   } catch (err) {
-    console.error(err);
+    console.error('create article:', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 }
 
+/** PUT /api/articles/:id — admin */
 async function update(req, res) {
   try {
     const article = await Article.findByPk(req.params.id);
     if (!article) return res.status(404).json({ error: 'Article introuvable' });
+
     const { title, body, excerpt, image_url, published } = req.body;
     const data = {};
     if (title != null) data.title = title.trim();
@@ -87,11 +101,12 @@ async function update(req, res) {
     await article.update(data);
     res.json({ article, message: 'Article mis à jour' });
   } catch (err) {
-    console.error(err);
+    console.error('update article:', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 }
 
+/** DELETE /api/articles/:id — admin */
 async function remove(req, res) {
   try {
     const article = await Article.findByPk(req.params.id);
@@ -99,10 +114,11 @@ async function remove(req, res) {
     await article.destroy();
     res.json({ message: 'Article supprimé' });
   } catch (err) {
-    console.error(err);
+    console.error('delete article:', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 }
+
 
 async function engagement(articleId, userId) {
   const { ArticleLike, ArticleComment, User } = require('../models');
@@ -121,7 +137,8 @@ async function engagement(articleId, userId) {
 
 async function getEngagement(req, res) {
   try {
-    res.json(await engagement(req.params.id, req.user?.id));
+    const data = await engagement(req.params.id, req.user?.id);
+    res.json(data);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -136,7 +153,8 @@ async function toggleLike(req, res) {
     const existing = await ArticleLike.findOne({ where: { article_id, user_id } });
     if (existing) await existing.destroy();
     else await ArticleLike.create({ article_id, user_id });
-    res.json(await engagement(article_id, user_id));
+    const data = await engagement(article_id, user_id);
+    res.json(data);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -164,6 +182,14 @@ async function addComment(req, res) {
       return res.status(400).json({ error: 'Indique ton prénom / pseudo' });
     }
     const display = author_name || [req.user?.first_name, req.user?.last_name].filter(Boolean).join(' ');
+    let parent_id = req.body.parent_id || null;
+    if (parent_id) {
+      const parent = await ArticleComment.findByPk(parent_id);
+      if (!parent || parent.article_id !== req.params.id) {
+        return res.status(400).json({ error: 'Commentaire parent introuvable' });
+      }
+      if (parent.parent_id) parent_id = parent.parent_id;
+    }
     await ArticleComment.create({
       article_id: req.params.id,
       user_id: req.user?.id || null,
@@ -171,6 +197,7 @@ async function addComment(req, res) {
       body,
       approved: false,
       hidden: false,
+      parent_id,
     });
     res.status(201).json({
       pending: true,
@@ -197,7 +224,10 @@ async function listPendingComments(req, res) {
       order: [['createdAt', 'DESC']],
       limit: 100,
     });
-    res.json({ count: comments.length, comments });
+    res.json({
+      count: comments.length,
+      comments,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -224,6 +254,16 @@ async function moderateComment(req, res) {
 }
 
 module.exports = {
-  listPublic, getOne, listAll, create, update, remove,
-  getEngagement, toggleLike, addComment, listPendingComments, moderateComment,
+  listPublic,
+  getOne,
+  listAll,
+  create,
+  update,
+  remove,
+  getEngagement,
+  toggleLike,
+  addComment,
+  listPendingComments,
+  moderateComment,
 };
+
