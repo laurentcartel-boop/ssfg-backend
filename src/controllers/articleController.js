@@ -190,15 +190,20 @@ async function addComment(req, res) {
       }
       if (parent.parent_id) parent_id = parent.parent_id;
     }
+    const autoOk = await canModerateSite(req.user);
     await ArticleComment.create({
       article_id: req.params.id,
       user_id: req.user?.id || null,
       author_name: display || 'Visiteur',
       body,
-      approved: false,
+      approved: !!autoOk,
       hidden: false,
       parent_id,
     });
+    if (autoOk) {
+      const data = await engagement(req.params.id, req.user.id);
+      return res.status(201).json({ ...data, pending: false, message: 'Commentaire publié' });
+    }
     res.status(201).json({
       pending: true,
       message: 'Commentaire envoyé. Il apparaîtra après validation.',
