@@ -1,0 +1,77 @@
+let webpush = null;
+try {
+  webpush = require('web-push');
+} catch (e) {
+  webpush = null;
+}
+
+function configured() {
+  return !!(
+    webpush &&
+    process.env.VAPID_PUBLIC_KEY &&
+    process.env.VAPID_PRIVATE_KEY
+  );
+}
+
+function init() {
+  if (!configured()) return false;
+  webpush.setVapidDetails(
+    process.env.VAPID_SUBJECT || 'mailto:noreply@ssfg.fr',
+    process.env.VAPID_PUBLIC_KEY,
+    process.env.VAPID_PRIVATE_KEY
+  );
+  return true;
+}
+
+async function sendToSubscription(sub, payload) {
+  if (!init()) return { skipped: true };
+  await webpush.sendNotification(
+    {
+      endpoint: sub.endpoint,
+      keys: { p256dh: sub.p256dh, auth: sub.auth },
+    },
+    JSON.stringify(payload)
+  );
+  return { ok: true };
+}
+
+async function notifyUsers(userIds, payload) {
+  if (!init()) {
+    console.warn('Push non configuré (VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / npm web-push)');
+    return { skipped: true };
+  }
+  const { PushSubscription } = require('../models');
+  const { Op } = require('sequelize');
+  const where = userIds && userIds.length ? { user_id: { [Op.in]: userIds } } : {};
+  const subs = await PushSubscription.findAll({ where });
+  let sent = 0;
+  for (const sub of subs) {
+    try {
+      await sendToSubscription(sub, payload);
+      sent += 1;
+    } catch (e) {
+      const code = e.statusCode || e.status;
+      if (code === 404 || code === 410) {
+        await sub.destroy().catch(() => {});
+      } else {
+        console.warn('push fail', e.message);
+      }
+    }
+  }
+  return { ok: true, sent, total: subs.length };
+}
+
+async function notifyPlatine(payload) {
+  const { User } = require('../models');
+  const { Op } = require('sequelize');
+  const mods = await User.findAll({
+    where: { role: { [Op.in]: ['platine_admin', 'super_admin'] }, is_active: true },
+    attributes: ['id'],
+  });
+  return notifyUsers(
+    mods.map((u) => u.id),
+    payload
+  );
+}
+
+module.exports = { configured, notifyUsers, notifyPlatine };
