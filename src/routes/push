@@ -1,0 +1,58 @@
+const express = require('express');
+const router = express.Router();
+const { authenticate } = require('../middleware/auth');
+const { PushSubscription } = require('../models');
+const { configured, notifyUsers } = require('../utils/push');
+
+router.get('/public-key', (req, res) => {
+  res.json({
+    configured: configured(),
+    publicKey: process.env.VAPID_PUBLIC_KEY || null,
+  });
+});
+
+router.post('/subscribe', authenticate, async (req, res) => {
+  try {
+    const sub = req.body.subscription || req.body;
+    if (!sub || !sub.endpoint || !sub.keys) {
+      return res.status(400).json({ error: 'Abonnement invalide' });
+    }
+    const existing = await PushSubscription.findOne({ where: { endpoint: sub.endpoint } });
+    if (existing) {
+      await existing.update({
+        user_id: req.user.id,
+        p256dh: sub.keys.p256dh,
+        auth: sub.keys.auth,
+      });
+    } else {
+      await PushSubscription.create({
+        user_id: req.user.id,
+        endpoint: sub.endpoint,
+        p256dh: sub.keys.p256dh,
+        auth: sub.keys.auth,
+      });
+    }
+    res.json({ message: 'Notifications activées' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+router.post('/test', authenticate, async (req, res) => {
+  try {
+    const r = await notifyUsers([req.user.id], {
+      title: 'SSFG',
+      body: 'Test de notification : ça marche.',
+      url: '/scoring/',
+    });
+    if (r.skipped) {
+      return res.status(400).json({ error: 'Push non configuré (clés VAPID Railway)' });
+    }
+    res.json({ message: r.sent ? `Notification envoyée (${r.sent})` : 'Aucun appareil enregistré. Active d’abord les notifs.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+module.exports = router;
