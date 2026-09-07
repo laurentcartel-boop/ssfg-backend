@@ -11,6 +11,15 @@ router.get('/public-key', (req, res) => {
   });
 });
 
+router.get('/me', authenticate, async (req, res) => {
+  try {
+    const n = await PushSubscription.count({ where: { user_id: req.user.id } });
+    res.json({ count: n, configured: configured() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/subscribe', authenticate, async (req, res) => {
   try {
     const sub = req.body.subscription || req.body;
@@ -32,10 +41,11 @@ router.post('/subscribe', authenticate, async (req, res) => {
         auth: sub.keys.auth,
       });
     }
-    res.json({ message: 'Notifications activées' });
+    const n = await PushSubscription.count({ where: { user_id: req.user.id } });
+    res.json({ message: 'Notifications activees', count: n });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Erreur serveur' });
+    res.status(500).json({ error: err.message || 'Erreur serveur' });
   }
 });
 
@@ -43,13 +53,19 @@ router.post('/test', authenticate, async (req, res) => {
   try {
     const r = await notifyUsers([req.user.id], {
       title: 'SSFG',
-      body: 'Test de notification : ça marche.',
+      body: 'Test de notification : ca marche.',
       url: '/scoring/',
     });
     if (r.skipped) {
-      return res.status(400).json({ error: 'Push non configuré (clés VAPID Railway)' });
+      return res.status(400).json({ error: 'Push non configure (cles VAPID Railway)' });
     }
-    res.json({ message: r.sent ? `Notification envoyée (${r.sent})` : 'Aucun appareil enregistré. Active d’abord les notifs.' });
+    res.json({
+      message: r.sent
+        ? 'Notification envoyee (' + r.sent + ')'
+        : 'Aucun appareil enregistre. Active d abord les notifs.',
+      sent: r.sent || 0,
+      total: r.total || 0,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
