@@ -1,11 +1,12 @@
-const { ChatMessage, User, Club, ChatRead } = require('../models');
+const { ChatMessage, User, Club, ChatRead, PushSubscription } = require('../models');
 const { Op } = require('sequelize');
+const { notifyUsers } = require('../utils/push');
 
 function canAccessRoom(user, room) {
   if (!room) return false;
   if (room === 'interclubs') return true;
   if (room.startsWith('club:')) {
-    return Boolean(user.club_id) && room === `club:${user.club_id}`;
+    return Boolean(user.club_id) && room === 'club:' + user.club_id;
   }
   return false;
 }
@@ -16,7 +17,7 @@ async function listRooms(req, res) {
     if (req.user.club_id) {
       const club = await Club.findByPk(req.user.club_id);
       rooms.push({
-        id: `club:${req.user.club_id}`,
+        id: 'club:' + req.user.club_id,
         name: club ? (club.short_name || club.code || club.name) : 'Mon club',
         type: 'club',
       });
@@ -32,7 +33,7 @@ async function listMessages(req, res) {
   try {
     const room = String(req.query.room || 'interclubs');
     if (!canAccessRoom(req.user, room)) {
-      return res.status(403).json({ error: 'Salon réservé au club' });
+      return res.status(403).json({ error: 'Salon reserve au club' });
     }
     const rows = await ChatMessage.findAll({
       where: { room, hidden: false },
@@ -46,7 +47,7 @@ async function listMessages(req, res) {
         body: m.body,
         created_at: m.createdAt,
         user_id: m.user_id,
-        author: m.user ? `${m.user.first_name} ${m.user.last_name}` : 'Joueur',
+        author: m.user ? m.user.first_name + ' ' + m.user.last_name : 'Joueur',
       })),
     });
   } catch (err) {
@@ -60,14 +61,34 @@ async function postMessage(req, res) {
     const room = String(req.body.room || 'interclubs');
     const body = String(req.body.body || '').trim();
     if (!canAccessRoom(req.user, room)) {
-      return res.status(403).json({ error: 'Salon réservé au club' });
+      return res.status(403).json({ error: 'Salon reserve au club' });
     }
     if (body.length < 1) return res.status(400).json({ error: 'Message vide' });
-    if (body.length > 500) return res.status(400).json({ error: 'Max 500 caractères' });
-    const m = await ChatMessage.create({
-      room,
-      user_id: req.user.id,
-      body,
+    if (body.length > 500) return res.status(400).json({ error: 'Max 500 caracteres' });
+    const m = await ChatMessage.create({ room, user_id: req.user.id, body });
+    const author = ((req.user.first_name || '') + ' ' + (req.user.last_name || '')).trim() || 'Joueur';
+    const title = room === 'interclubs' ? 'SSFG Interclubs' : 'SSFG Club';
+    setImmediate(() => {
+      (async () => {
+        const subs = await PushSubscription.findAll({ attributes: ['user_id'] });
+        let ids = [...new Set(subs.map((s) => s.user_id).filter(Boolean))];
+        if (room.startsWith('club:')) {
+          const clubId = room.slice(5);
+          const members = await User.findAll({
+            where: { club_id: clubId, is_active: true },
+            attributes: ['id'],
+          });
+          const ok = new Set(members.map((u) => u.id));
+          ids = ids.filter((id) => ok.has(id));
+        }
+        ids = ids.filter((id) => id !== req.user.id);
+        if (!ids.length) return;
+        await notifyUsers(ids, {
+          title,
+          body: author + ' : ' + body.slice(0, 80),
+          url: '/scoring/',
+        });
+      })().catch((e) => console.warn('push chat', e.message));
     });
     res.status(201).json({
       message: {
@@ -75,7 +96,7 @@ async function postMessage(req, res) {
         body: m.body,
         created_at: m.createdAt,
         user_id: m.user_id,
-        author: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+        author,
       },
     });
   } catch (err) {
@@ -89,33 +110,28 @@ async function hideMessage(req, res) {
     const m = await ChatMessage.findByPk(req.params.id);
     if (!m) return res.status(404).json({ error: 'Message introuvable' });
     const own = m.user_id === req.user.id;
-    const admin = ['admin', 'super_admin'].includes(req.user.role);
+    const admin = ['admin', 'super_admin', 'platine_admin'].includes(req.user.role);
     if (!own && !admin) return res.status(403).json({ error: 'Interdit' });
     await m.update({ hidden: true });
-    res.json({ message: 'Message retiré' });
+    res.json({ message: 'Message retire' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 }
 
-
 async function accessibleRooms(user) {
   const rooms = ['interclubs'];
-  if (user.club_id) rooms.push(`club:${user.club_id}`);
+  if (user.club_id) rooms.push('club:' + user.club_id);
   return rooms;
 }
 
 async function unread(req, res) {
   try {
     const rooms = await accessibleRooms(req.user);
-    const reads = await ChatRead.findAll({
-      where: { user_id: req.user.id, room: rooms },
-    });
+    const reads = await ChatRead.findAll({ where: { user_id: req.user.id, room: rooms } });
     const last = {};
-    reads.forEach((r) => {
-      last[r.room] = r.last_read_at;
-    });
+    reads.forEach((r) => { last[r.room] = r.last_read_at; });
     const byRoom = {};
     let total = 0;
     for (const room of rooms) {
@@ -137,7 +153,7 @@ async function markRead(req, res) {
   try {
     const room = String(req.body.room || req.query.room || 'interclubs');
     if (!canAccessRoom(req.user, room)) {
-      return res.status(403).json({ error: 'Salon réservé au club' });
+      return res.status(403).json({ error: 'Salon reserve au club' });
     }
     const [row] = await ChatRead.findOrCreate({
       where: { user_id: req.user.id, room },
