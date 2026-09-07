@@ -9,6 +9,7 @@ const {
   sequelize,
 } = require('../models');
 const { calculateIndexChange } = require('../services/indexService');
+const { notifyAllExcept } = require('../utils/push');
 
 function formatPlayer(row) {
   if (!row) return null;
@@ -665,6 +666,11 @@ async function launchCompetition(req, res) {
       }
     );
     const refreshed = await Competition.findByPk(competition.id);
+    notifyAllExcept(req.user.id, {
+      title: 'SSFG · Live compétition',
+      body: `${competition.name || 'Compétition'} est lancée`,
+      url: '/scoring/',
+    }).catch((e) => console.warn('push compet launch', e.message));
     res.json({
       competition: refreshed,
       message: 'Compétition lancée — live scoring actif, composition figée',
