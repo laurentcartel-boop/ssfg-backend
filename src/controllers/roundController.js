@@ -11,6 +11,7 @@ const {
 } = require('../models');
 const { calculateIndexChange } = require('../services/indexService');
 const { Op } = require('sequelize');
+const { notifyAllExcept } = require('../utils/push');
 
 /**
  * GET /api/rounds
@@ -174,6 +175,11 @@ async function createRound(req, res) {
       ],
     });
 
+    notifyAllExcept(req.user.id, {
+      title: 'SSFG · Live',
+      body: `Partie en cours : ${round.name}`,
+      url: '/scoring/',
+    }).catch((e) => console.warn('push live start', e.message));
     res.status(201).json({ round: fullRound, message: 'Partie créée' });
   } catch (err) {
     await t.rollback();
@@ -840,6 +846,12 @@ async function addComment(req, res) {
     const user = await User.findByPk(req.user.id, {
       attributes: ['id', 'first_name', 'last_name'],
     });
+    const who = user ? `${user.first_name || ''} ${user.last_name || ''}`.trim() : 'Joueur';
+    notifyAllExcept(req.user.id, {
+      title: `Live · ${round.name || 'Partie'}`,
+      body: `${who} : ${message}`,
+      url: '/scoring/',
+    }).catch((e) => console.warn('push live comment', e.message));
     res.status(201).json({
       comment: {
         id: c.id,
@@ -943,6 +955,18 @@ async function addExploit(req, res) {
     const user = await User.findByPk(user_id, {
       attributes: ['id', 'first_name', 'last_name'],
     });
+    const labels = {
+      hole_in_one: 'Hole in one',
+      albatross: 'Albatros',
+      eagle: 'Eagle',
+      moment: 'Moment',
+    };
+    const who = user ? `${user.first_name || ''} ${user.last_name || ''}`.trim() : 'Joueur';
+    notifyAllExcept(req.user.id, {
+      title: `Live · ${labels[exploit_type] || 'Exploit'}`,
+      body: `${who} trou ${hole_number}${e.comment ? ' — ' + e.comment : ''}`,
+      url: '/scoring/',
+    }).catch((e2) => console.warn('push live exploit', e2.message));
     res.status(201).json({
       exploit: {
         id: e.id,
