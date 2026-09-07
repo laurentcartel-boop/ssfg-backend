@@ -6,7 +6,11 @@ try {
 }
 
 function configured() {
-  return !!(webpush && process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
+  return !!(
+    webpush &&
+    process.env.VAPID_PUBLIC_KEY &&
+    process.env.VAPID_PRIVATE_KEY
+  );
 }
 
 function init() {
@@ -22,7 +26,10 @@ function init() {
 async function sendToSubscription(sub, payload) {
   if (!init()) return { skipped: true };
   await webpush.sendNotification(
-    { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+    {
+      endpoint: sub.endpoint,
+      keys: { p256dh: sub.p256dh, auth: sub.auth },
+    },
     JSON.stringify(payload)
   );
   return { ok: true };
@@ -30,7 +37,7 @@ async function sendToSubscription(sub, payload) {
 
 async function notifyUsers(userIds, payload) {
   if (!init()) {
-    console.warn('Push non configure');
+    console.warn('Push non configuré (VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / npm web-push)');
     return { skipped: true };
   }
   const { PushSubscription } = require('../models');
@@ -44,8 +51,11 @@ async function notifyUsers(userIds, payload) {
       sent += 1;
     } catch (e) {
       const code = e.statusCode || e.status;
-      if (code === 404 || code === 410) await sub.destroy().catch(function () {});
-      else console.warn('push fail', e.message);
+      if (code === 404 || code === 410) {
+        await sub.destroy().catch(() => {});
+      } else {
+        console.warn('push fail', e.message);
+      }
     }
   }
   return { ok: true, sent, total: subs.length };
@@ -58,7 +68,10 @@ async function notifyPlatine(payload) {
     where: { role: { [Op.in]: ['platine_admin', 'super_admin'] }, is_active: true },
     attributes: ['id'],
   });
-  return notifyUsers(mods.map(function (u) { return u.id; }), payload);
+  return notifyUsers(
+    mods.map((u) => u.id),
+    payload
+  );
 }
 
 async function notifyAllExcept(excludeUserId, payload) {
@@ -67,13 +80,9 @@ async function notifyAllExcept(excludeUserId, payload) {
   const where = excludeUserId
     ? { user_id: { [Op.and]: [{ [Op.ne]: excludeUserId }, { [Op.ne]: null }] } }
     : { user_id: { [Op.ne]: null } };
-  const subs = await PushSubscription.findAll({ where: where, attributes: ['user_id'] });
-  const ids = [];
-  const seen = {};
-  subs.forEach(function (s) {
-    if (s.user_id && !seen[s.user_id]) { seen[s.user_id] = true; ids.push(s.user_id); }
-  });
+  const subs = await PushSubscription.findAll({ where, attributes: ['user_id'] });
+  const ids = [...new Set(subs.map((s) => s.user_id).filter(Boolean))];
   return notifyUsers(ids, payload);
 }
 
-module.exports = { configured: configured, notifyUsers: notifyUsers, notifyPlatine: notifyPlatine, notifyAllExcept: notifyAllExcept };
+module.exports = { configured, notifyUsers, notifyPlatine, notifyAllExcept };
