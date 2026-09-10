@@ -101,6 +101,11 @@ async function seedClubs() {
 async function start() {
   try {
     await sequelize.authenticate();
+    try { await sequelize.query('ALTER TABLE users ADD COLUMN notify_actu TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE users ADD COLUMN notify_chat_inter TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE users ADD COLUMN notify_chat_club TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE users ADD COLUMN notify_live TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE round_players ADD COLUMN counts_for_index TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE article_comments ADD COLUMN approved TINYINT(1) NOT NULL DEFAULT 0'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE article_comments ADD COLUMN author_name VARCHAR(80) NULL'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE article_comments ADD COLUMN parent_id CHAR(36) NULL'); } catch (e) {}
@@ -127,11 +132,6 @@ async function start() {
     try { await sequelize.query('ALTER TABLE rounds ADD COLUMN investigation_note VARCHAR(255) NULL'); } catch (e) {}
     try { await sequelize.query("ALTER TABLE users MODIFY COLUMN role ENUM('joueur','admin','super_admin','platine_admin') NOT NULL DEFAULT 'joueur'"); } catch (e) {}
     try { await sequelize.query('ALTER TABLE rounds ADD COLUMN scoring_user_id CHAR(36) NULL'); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE round_players ADD COLUMN counts_for_index TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE users ADD COLUMN notify_actu TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE users ADD COLUMN notify_chat_inter TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE users ADD COLUMN notify_chat_club TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE users ADD COLUMN notify_live TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
     console.log('Tables synchronisees');
     app.listen(PORT, () => {
       console.log('Serveur demarre sur le port', PORT);
