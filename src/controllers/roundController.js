@@ -102,7 +102,7 @@ async function getRound(req, res) {
 async function createRound(req, res) {
   const t = await sequelize.transaction();
   try {
-    const { name, type = 'libre', course_id, date, player_ids = [] } = req.body;
+    const { name, type = 'libre', course_id, date, player_ids = [], index_player_ids } = req.body;
 
     if (!name || !course_id || !date) {
       await t.rollback();
@@ -149,13 +149,20 @@ async function createRound(req, res) {
       { transaction: t }
     );
 
-    // Créer les RoundPlayer avec l'index actuel
+    const indexSet = Array.isArray(index_player_ids) ? new Set(index_player_ids) : null;
     for (const player of players) {
+      const counts =
+        type === 'entrainement'
+          ? false
+          : indexSet
+            ? indexSet.has(player.id)
+            : true;
       await RoundPlayer.create(
         {
           round_id: round.id,
           user_id: player.id,
           starting_index: player.index_value,
+          counts_for_index: counts,
         },
         { transaction: t }
       );
@@ -425,7 +432,7 @@ async function closeRound(req, res) {
       const scoreToPar = totalScore - parTotal;
       const netScore = Math.round((totalScore - Number(rp.starting_index)) * 10) / 10;
 
-      const isTraining = round.type === 'entrainement';
+      const isTraining = round.type === 'entrainement' || rp.counts_for_index === false;
       let change = 0;
       let newIndex = Number(rp.starting_index);
 
@@ -803,7 +810,7 @@ async function listComments(req, res) {
     const comments = await RoundComment.findAll({
       where: { round_id: req.params.id },
       include: [{ model: User, as: 'user', attributes: ['id', 'first_name', 'last_name'] }],
-      order: [['created_at', 'ASC']],
+      order: [['createdAt', 'ASC']],
       limit: 500,
     });
     res.json({
