@@ -44,6 +44,11 @@ const RoundPlayer = sequelize.define('RoundPlayer', {
     allowNull: false,
     defaultValue: false,
   },
+  counts_for_index: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+  },
 }, {
   tableName: 'round_players',
 });

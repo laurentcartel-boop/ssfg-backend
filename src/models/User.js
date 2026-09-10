@@ -64,6 +64,10 @@ const User = sequelize.define('User', {
     type: DataTypes.UUID,
     allowNull: true,
   },
+  notify_actu: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+  notify_chat_inter: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+  notify_chat_club: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+  notify_live: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
 }, {
   tableName: 'users',
   hooks: {
