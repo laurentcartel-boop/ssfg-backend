@@ -112,10 +112,10 @@ async function start() {
     try { await sequelize.query('ALTER TABLE article_comments MODIFY user_id CHAR(36) NULL'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE article_likes ADD COLUMN guest_key VARCHAR(64) NULL'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE article_likes MODIFY user_id CHAR(36) NULL'); } catch (e) {}
-    try {
-      const [cols] = await sequelize.query("SHOW COLUMNS FROM round_comments LIKE 'createdAt'");
-      if (!cols.length) await sequelize.query('DROP TABLE IF EXISTS round_comments');
-    } catch (e) {}
+    try { await sequelize.query('ALTER TABLE round_comments ADD COLUMN createdAt DATETIME NULL'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE round_comments ADD COLUMN updatedAt DATETIME NULL'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE round_comments ADD COLUMN display_name VARCHAR(40) NULL'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE round_comments MODIFY user_id CHAR(36) NULL'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE accounting_entries ADD COLUMN attachment_url LONGTEXT NULL'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE competitions ADD COLUMN launched_at DATETIME NULL'); } catch (e) {}
     try { await sequelize.query("ALTER TABLE competitions ADD COLUMN scope_type ENUM('club','interclub','open') NOT NULL DEFAULT 'open'"); } catch (e) {}
