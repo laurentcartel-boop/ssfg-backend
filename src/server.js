@@ -60,13 +60,10 @@ async function migrateMatchPlay() {
     const name = row.CONSTRAINT_NAME || row.constraint_name;
     try {
       await sequelize.query('ALTER TABLE matchplay_matches DROP FOREIGN KEY `' + name + '`');
-      console.log('FK dropped:', name);
-    } catch (e) {
-      console.warn('FK drop skip:', name, e.message);
-    }
+    } catch (e) {}
   }
-  try { await sequelize.query('ALTER TABLE matchplay_matches MODIFY player_a_id CHAR(36) NULL'); } catch (e) { console.warn('player_a_id:', e.message); }
-  try { await sequelize.query('ALTER TABLE matchplay_matches MODIFY player_b_id CHAR(36) NULL'); } catch (e) { console.warn('player_b_id:', e.message); }
+  try { await sequelize.query('ALTER TABLE matchplay_matches MODIFY player_a_id CHAR(36) NULL'); } catch (e) {}
+  try { await sequelize.query('ALTER TABLE matchplay_matches MODIFY player_b_id CHAR(36) NULL'); } catch (e) {}
   try { await sequelize.query("ALTER TABLE matchplay_matches ADD COLUMN is_bye TINYINT(1) NOT NULL DEFAULT 0"); } catch (e) {}
 }
 
@@ -74,17 +71,11 @@ async function promotePlatine() {
   const { User } = require('./models');
   const raw = process.env.PLATINE_EMAILS || process.env.PLATINE_EMAIL || '';
   const emails = raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-  if (!emails.length) {
-    console.log('PLATINE_EMAILS non defini');
-    return;
-  }
+  if (!emails.length) return;
   for (const email of emails) {
     const user = await User.findOne({ where: { email } });
-    if (!user) { console.warn('PLATINE introuvable', email); continue; }
-    if (user.role !== 'platine_admin') {
-      await user.update({ role: 'platine_admin' });
-      console.log('Admin Platine :', email);
-    }
+    if (!user) continue;
+    if (user.role !== 'platine_admin') await user.update({ role: 'platine_admin' });
   }
 }
 
@@ -101,13 +92,10 @@ async function seedClubs() {
   for (const d of defaults) {
     try {
       await Club.findOrCreate({ where: { code: d.code }, defaults: { ...d, is_active: true } });
-    } catch (e) { console.warn('seed club', d.code, e.message); }
+    } catch (e) {}
   }
   const ssfg = await Club.findOne({ where: { code: 'SSFG' } });
-  if (ssfg) {
-    await User.update({ club_id: ssfg.id }, { where: { club_id: null } });
-  }
-  console.log('Clubs seed OK');
+  if (ssfg) await User.update({ club_id: ssfg.id }, { where: { club_id: null } });
 }
 
 async function start() {
@@ -119,12 +107,9 @@ async function start() {
     try { await sequelize.query('ALTER TABLE article_comments MODIFY user_id CHAR(36) NULL'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE article_likes ADD COLUMN guest_key VARCHAR(64) NULL'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE article_likes MODIFY user_id CHAR(36) NULL'); } catch (e) {}
-    console.log('Connexion base de donnees OK');
     try {
       const [cols] = await sequelize.query("SHOW COLUMNS FROM round_comments LIKE 'createdAt'");
-      if (!cols.length) {
-        await sequelize.query('DROP TABLE IF EXISTS round_comments');
-      }
+      if (!cols.length) await sequelize.query('DROP TABLE IF EXISTS round_comments');
     } catch (e) {}
     try { await sequelize.query('ALTER TABLE accounting_entries ADD COLUMN attachment_url LONGTEXT NULL'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE competitions ADD COLUMN launched_at DATETIME NULL'); } catch (e) {}
@@ -137,11 +122,16 @@ async function start() {
     try { await sequelize.query('ALTER TABLE accounting_entries ADD COLUMN club_id CHAR(36) NULL'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE invoices ADD COLUMN club_id CHAR(36) NULL'); } catch (e) {}
     await promotePlatine();
-    try { await migrateMatchPlay(); } catch (e) { console.warn('migrateMatchPlay', e.message); }
+    try { await migrateMatchPlay(); } catch (e) {}
     try { await sequelize.query('ALTER TABLE rounds ADD COLUMN under_investigation TINYINT(1) NOT NULL DEFAULT 0'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE rounds ADD COLUMN investigation_note VARCHAR(255) NULL'); } catch (e) {}
     try { await sequelize.query("ALTER TABLE users MODIFY COLUMN role ENUM('joueur','admin','super_admin','platine_admin') NOT NULL DEFAULT 'joueur'"); } catch (e) {}
     try { await sequelize.query('ALTER TABLE rounds ADD COLUMN scoring_user_id CHAR(36) NULL'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE round_players ADD COLUMN counts_for_index TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE users ADD COLUMN notify_actu TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE users ADD COLUMN notify_chat_inter TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE users ADD COLUMN notify_chat_club TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE users ADD COLUMN notify_live TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
     console.log('Tables synchronisees');
     app.listen(PORT, () => {
       console.log('Serveur demarre sur le port', PORT);
