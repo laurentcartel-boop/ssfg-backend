@@ -162,17 +162,23 @@ async function getMatch(req, res) {
 
 async function createLibreMatch(req, res) {
   try {
-    const { player_b_id } = req.body;
+    const { player_b_id, player_a_id } = req.body;
     if (!player_b_id) return res.status(400).json({ error: 'Adversaire requis' });
-    if (player_b_id === req.user.id) {
-      return res.status(400).json({ error: 'Choisissez un autre joueur' });
+    const isAdmin = ['admin', 'super_admin', 'platine_admin'].includes(req.user.role);
+    const aId = isAdmin && player_a_id ? player_a_id : req.user.id;
+    if (player_b_id === aId) {
+      return res.status(400).json({ error: 'Deux joueurs différents requis' });
     }
     const opponent = await User.findByPk(player_b_id);
     if (!opponent) return res.status(404).json({ error: 'Adversaire introuvable' });
+    if (aId !== req.user.id) {
+      const a = await User.findByPk(aId);
+      if (!a) return res.status(404).json({ error: 'Joueur A introuvable' });
+    }
 
     const match = await MatchPlayMatch.create({
       championship_id: null,
-      player_a_id: req.user.id,
+      player_a_id: aId,
       player_b_id,
       leg: 1,
       status: 'in_progress',
