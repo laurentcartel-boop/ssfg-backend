@@ -575,6 +575,12 @@ async function setPlayerDnf(req, res) {
 
     const rp = (round.players || []).find((p) => p.user_id === req.params.userId);
     if (!rp) return res.status(404).json({ error: 'Joueur absent de la partie' });
+    const isAdmin = ['admin', 'super_admin', 'platine_admin'].includes(req.user.role);
+    const isScorer = round.scoring_user_id === req.user.id;
+    const isInRound = (round.players || []).some((p) => p.user_id === req.user.id);
+    if (!isAdmin && !isScorer && !isInRound) {
+      return res.status(403).json({ error: 'Pas le droit de marquer un DNF sur cette partie' });
+    }
 
     const dnf = req.body?.dnf !== undefined ? Boolean(req.body.dnf) : !rp.dnf;
     await rp.update({ dnf });
@@ -744,7 +750,11 @@ async function deleteRound(req, res) {
     const reason = String(req.body?.reason || req.query.reason || '').trim();
     const note = String(req.body?.note || '').trim().slice(0, 500);
     const pin = String(req.body?.password || req.body?.pin || '');
-    const expectedPin = process.env.DELETE_TEST_PIN || 'SSFG-TEST';
+    const expectedPin = process.env.DELETE_TEST_PIN;
+    if (!expectedPin) {
+      await t.rollback();
+      return res.status(500).json({ error: 'DELETE_TEST_PIN non configuré' });
+    }
     const testDelete = ['test_appli', 'demo'].includes(reason);
 
     if (round.status === 'in_progress' && !testDelete) {
@@ -837,7 +847,7 @@ async function addComment(req, res) {
     if (round.status === 'closed') {
       return res.status(400).json({ error: 'Partie clôturée' });
     }
-    const isAdmin = ['admin', 'super_admin'].includes(req.user.role);
+    const isAdmin = ['admin', 'super_admin', 'platine_admin'].includes(req.user.role);
     const isPlayer = (round.players || []).some((p) => p.user_id === req.user.id);
     if (!isAdmin && !isPlayer) {
       return res.status(403).json({ error: 'Réservé aux joueurs de la partie' });
@@ -880,7 +890,7 @@ async function deleteComment(req, res) {
     if (!c || c.round_id !== req.params.id) {
       return res.status(404).json({ error: 'Commentaire introuvable' });
     }
-    const isAdmin = ['admin', 'super_admin'].includes(req.user.role);
+    const isAdmin = ['admin', 'super_admin', 'platine_admin'].includes(req.user.role);
     const round = await Round.findByPk(req.params.id, {
       include: [{ model: RoundPlayer, as: 'players' }],
     });
@@ -930,7 +940,7 @@ async function addExploit(req, res) {
       include: [{ model: RoundPlayer, as: 'players' }],
     });
     if (!round) return res.status(404).json({ error: 'Partie non trouvée' });
-    const isAdmin = ['admin', 'super_admin'].includes(req.user.role);
+    const isAdmin = ['admin', 'super_admin', 'platine_admin'].includes(req.user.role);
     const isPlayer = (round.players || []).some((p) => p.user_id === req.user.id);
     if (!isAdmin && !isPlayer) {
       return res.status(403).json({ error: 'Réservé aux joueurs de la partie' });
@@ -997,7 +1007,7 @@ async function deleteExploit(req, res) {
     if (!e || e.round_id !== req.params.id) {
       return res.status(404).json({ error: 'Exploit introuvable' });
     }
-    const isAdmin = ['admin', 'super_admin'].includes(req.user.role);
+    const isAdmin = ['admin', 'super_admin', 'platine_admin'].includes(req.user.role);
     const round = await Round.findByPk(req.params.id, {
       include: [{ model: RoundPlayer, as: 'players' }],
     });
@@ -1088,7 +1098,7 @@ async function updateExploit(req, res) {
       include: [{ model: RoundPlayer, as: 'players' }],
     });
     if (!round) return res.status(404).json({ error: 'Partie non trouvée' });
-    const isAdmin = ['admin', 'super_admin'].includes(req.user.role);
+    const isAdmin = ['admin', 'super_admin', 'platine_admin'].includes(req.user.role);
     const isPlayer =
       round && (round.players || []).some((p) => p.user_id === req.user.id);
     if (!isAdmin && !isPlayer && e.created_by !== req.user.id && e.user_id !== req.user.id) {
