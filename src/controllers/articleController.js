@@ -1,10 +1,13 @@
 const { Article, User } = require('../models');
 
+/** GET /api/articles — public : uniquement publiés */
 async function listPublic(req, res) {
   try {
     const articles = await Article.findAll({
       where: { published: true },
-      include: [{ model: User, as: 'author', attributes: ['id', 'first_name', 'last_name'] }],
+      include: [
+        { model: User, as: 'author', attributes: ['id', 'first_name', 'last_name'] },
+      ],
       order: [['published_at', 'DESC'], ['created_at', 'DESC']],
       limit: 50,
     });
@@ -15,15 +18,18 @@ async function listPublic(req, res) {
   }
 }
 
+/** GET /api/articles/:id — public si publié, sinon admin */
 async function getOne(req, res) {
   try {
     const article = await Article.findByPk(req.params.id, {
-      include: [{ model: User, as: 'author', attributes: ['id', 'first_name', 'last_name'] }],
+      include: [
+        { model: User, as: 'author', attributes: ['id', 'first_name', 'last_name'] },
+      ],
     });
     if (!article) return res.status(404).json({ error: 'Article introuvable' });
     if (!article.published) {
-      const role = req.user && req.user.role;
-      if (!role || !['admin', 'super_admin', 'platine_admin'].includes(role)) {
+      const role = req.user?.role;
+      if (!role || !['admin', 'super_admin'].includes(role)) {
         return res.status(404).json({ error: 'Article introuvable' });
       }
     }
@@ -34,10 +40,13 @@ async function getOne(req, res) {
   }
 }
 
+/** GET /api/articles/admin/all — admin : tous */
 async function listAll(req, res) {
   try {
     const articles = await Article.findAll({
-      include: [{ model: User, as: 'author', attributes: ['id', 'first_name', 'last_name'] }],
+      include: [
+        { model: User, as: 'author', attributes: ['id', 'first_name', 'last_name'] },
+      ],
       order: [['created_at', 'DESC']],
       limit: 100,
     });
@@ -48,66 +57,79 @@ async function listAll(req, res) {
   }
 }
 
+/** POST /api/articles — admin */
 async function create(req, res) {
   try {
-    const { title, body, excerpt, image_url, published } = req.body;
-    if (!title || !body) return res.status(400).json({ error: 'Titre et texte obligatoires' });
+    const { title, body, excerpt, image_url, published, link_url, link_label } = req.body;
+    if (!title || !body) {
+      return res.status(400).json({ error: 'Titre et texte obligatoires' });
+    }
     const isPub = Boolean(published);
     const article = await Article.create({
       title: title.trim(),
       body: body.trim(),
       excerpt: excerpt ? excerpt.trim() : title.trim().slice(0, 200),
       image_url: image_url || null,
+      link_url: link_url ? String(link_url).trim() : null,
+      link_label: link_label ? String(link_label).trim().slice(0, 80) : null,
       published: isPub,
       published_at: isPub ? new Date() : null,
       created_by: req.user.id,
     });
-    res.status(201).json({ article, message: isPub ? 'Article publie' : 'Brouillon enregistre' });
+    res.status(201).json({ article, message: isPub ? 'Article publié' : 'Brouillon enregistré' });
   } catch (err) {
     console.error('create article:', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 }
 
+/** PUT /api/articles/:id — admin */
 async function update(req, res) {
   try {
     const article = await Article.findByPk(req.params.id);
     if (!article) return res.status(404).json({ error: 'Article introuvable' });
-    const { title, body, excerpt, image_url, published } = req.body;
+
+    const { title, body, excerpt, image_url, published, link_url, link_label } = req.body;
     const data = {};
     if (title != null) data.title = title.trim();
     if (body != null) data.body = body.trim();
     if (excerpt != null) data.excerpt = excerpt.trim();
     if (image_url !== undefined) data.image_url = image_url || null;
+    if (link_url !== undefined) data.link_url = link_url ? String(link_url).trim() : null;
+    if (link_label !== undefined) data.link_label = link_label ? String(link_label).trim().slice(0, 80) : null;
     if (published !== undefined) {
       data.published = Boolean(published);
       if (data.published && !article.published_at) data.published_at = new Date();
       if (!data.published) data.published_at = null;
     }
     await article.update(data);
-    res.json({ article, message: 'Article mis a jour' });
+    res.json({ article, message: 'Article mis à jour' });
   } catch (err) {
     console.error('update article:', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 }
 
+/** DELETE /api/articles/:id — admin */
 async function remove(req, res) {
   try {
     const article = await Article.findByPk(req.params.id);
     if (!article) return res.status(404).json({ error: 'Article introuvable' });
     await article.destroy();
-    res.json({ message: 'Article supprime' });
+    res.json({ message: 'Article supprimé' });
   } catch (err) {
     console.error('delete article:', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 }
 
+
 async function engagement(articleId, userId) {
   const { ArticleLike, ArticleComment, User } = require('../models');
   const likes = await ArticleLike.count({ where: { article_id: articleId } });
-  const liked = userId ? Boolean(await ArticleLike.findOne({ where: { article_id: articleId, user_id: userId } })) : false;
+  const liked = userId
+    ? Boolean(await ArticleLike.findOne({ where: { article_id: articleId, user_id: userId } }))
+    : false;
   const comments = await ArticleComment.findAll({
     where: { article_id: articleId, hidden: false, approved: true },
     include: [{ model: User, as: 'user', attributes: ['id', 'first_name', 'last_name'], required: false }],
@@ -119,7 +141,7 @@ async function engagement(articleId, userId) {
 
 async function getEngagement(req, res) {
   try {
-    const data = await engagement(req.params.id, req.user && req.user.id);
+    const data = await engagement(req.params.id, req.user?.id);
     res.json(data);
   } catch (err) {
     console.error(err);
@@ -131,16 +153,20 @@ async function toggleLike(req, res) {
   try {
     const { ArticleLike } = require('../models');
     const article_id = req.params.id;
-    const user_id = (req.user && req.user.id) || null;
+    const user_id = req.user?.id || null;
     const guest_key = String(req.body.guest_key || '').slice(0, 64) || null;
-    if (!user_id && !guest_key) return res.status(400).json({ error: 'Connexion ou jeton visiteur manquant' });
+    if (!user_id && !guest_key) {
+      return res.status(400).json({ error: 'Connexion ou jeton visiteur manquant' });
+    }
     const existing = user_id
       ? await ArticleLike.findOne({ where: { article_id, user_id } })
       : await ArticleLike.findOne({ where: { article_id, guest_key } });
     if (existing) await existing.destroy();
     else await ArticleLike.create({ article_id, user_id, guest_key: user_id ? null : guest_key });
     const data = await engagement(article_id, user_id);
-    if (!user_id) data.liked = !existing;
+    if (!user_id) {
+      data.liked = !existing;
+    }
     res.json(data);
   } catch (err) {
     console.error(err);
@@ -164,19 +190,23 @@ async function addComment(req, res) {
     const body = String(req.body.body || '').trim();
     const author_name = String(req.body.author_name || req.body.name || '').trim().slice(0, 80);
     if (body.length < 2) return res.status(400).json({ error: 'Commentaire trop court' });
-    if (body.length > 500) return res.status(400).json({ error: 'Max 500 caracteres' });
-    if (!req.user && author_name.length < 2) return res.status(400).json({ error: 'Indique ton prenom / pseudo' });
-    const display = author_name || [req.user && req.user.first_name, req.user && req.user.last_name].filter(Boolean).join(' ');
+    if (body.length > 500) return res.status(400).json({ error: 'Max 500 caractères' });
+    if (!req.user && author_name.length < 2) {
+      return res.status(400).json({ error: 'Indique ton prénom / pseudo' });
+    }
+    const display = author_name || [req.user?.first_name, req.user?.last_name].filter(Boolean).join(' ');
     let parent_id = req.body.parent_id || null;
     if (parent_id) {
       const parent = await ArticleComment.findByPk(parent_id);
-      if (!parent || parent.article_id !== req.params.id) return res.status(400).json({ error: 'Commentaire parent introuvable' });
+      if (!parent || parent.article_id !== req.params.id) {
+        return res.status(400).json({ error: 'Commentaire parent introuvable' });
+      }
       if (parent.parent_id) parent_id = parent.parent_id;
     }
     const autoOk = await canModerateSite(req.user);
     await ArticleComment.create({
       article_id: req.params.id,
-      user_id: (req.user && req.user.id) || null,
+      user_id: req.user?.id || null,
       author_name: display || 'Visiteur',
       body,
       approved: !!autoOk,
@@ -185,28 +215,29 @@ async function addComment(req, res) {
     });
     if (autoOk) {
       const data = await engagement(req.params.id, req.user.id);
-      return res.status(201).json({ ...data, pending: false, message: 'Commentaire publie' });
+      return res.status(201).json({ ...data, pending: false, message: 'Commentaire publié' });
     }
     try {
+      const { Article } = require('../models');
       const art = await Article.findByPk(req.params.id, { attributes: ['title'] });
       const { notifyPendingComment } = require('../utils/mailer');
       notifyPendingComment({
-        articleTitle: art && art.title,
+        articleTitle: art?.title,
         author: display || 'Visiteur',
         excerpt: body.slice(0, 200),
-      }).catch(function (e) { console.warn('mail pending comment', e.message); });
+      }).catch((e) => console.warn('mail pending comment', e.message));
       const { notifyPlatine } = require('../utils/push');
       notifyPlatine({
-        title: 'SSFG - commentaire a valider',
-        body: (display || 'Visiteur') + ' : ' + String(body || '').slice(0, 80),
-        url: '/scoring/',
-      }).catch(function (e) { console.warn('push pending comment', e.message); });
+        title: 'SSFG — commentaire à valider',
+        body: `${display || 'Visiteur'} : ${(body || '').slice(0, 80)}`,
+        url: '/scoring/admin/articles',
+      }).catch((e) => console.warn('push pending comment', e.message));
     } catch (e) {
       console.warn('mail pending comment', e.message);
     }
     res.status(201).json({
       pending: true,
-      message: 'Commentaire envoye. Il apparaitra apres validation.',
+      message: 'Commentaire envoyé. Il apparaîtra après validation.',
     });
   } catch (err) {
     console.error(err);
@@ -216,7 +247,9 @@ async function addComment(req, res) {
 
 async function listPendingComments(req, res) {
   try {
-    if (!(await canModerateSite(req.user))) return res.status(403).json({ error: 'Reserve a la moderation SSFG' });
+    if (!(await canModerateSite(req.user))) {
+      return res.status(403).json({ error: 'Réservé à la modération SSFG' });
+    }
     const { ArticleComment, Article, User } = require('../models');
     const comments = await ArticleComment.findAll({
       where: { approved: false, hidden: false },
@@ -227,7 +260,10 @@ async function listPendingComments(req, res) {
       order: [['createdAt', 'DESC']],
       limit: 100,
     });
-    res.json({ count: comments.length, comments });
+    res.json({
+      count: comments.length,
+      comments,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -236,7 +272,9 @@ async function listPendingComments(req, res) {
 
 async function moderateComment(req, res) {
   try {
-    if (!(await canModerateSite(req.user))) return res.status(403).json({ error: 'Reserve a la moderation SSFG' });
+    if (!(await canModerateSite(req.user))) {
+      return res.status(403).json({ error: 'Réservé à la modération SSFG' });
+    }
     const { ArticleComment } = require('../models');
     const row = await ArticleComment.findByPk(req.params.commentId);
     if (!row) return res.status(404).json({ error: 'Commentaire introuvable' });
@@ -253,6 +291,16 @@ async function moderateComment(req, res) {
 }
 
 module.exports = {
-  listPublic, getOne, listAll, create, update, remove,
-  getEngagement, toggleLike, addComment, listPendingComments, moderateComment,
+  listPublic,
+  getOne,
+  listAll,
+  create,
+  update,
+  remove,
+  getEngagement,
+  toggleLike,
+  addComment,
+  listPendingComments,
+  moderateComment,
 };
+
