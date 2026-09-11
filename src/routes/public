@@ -126,6 +126,35 @@ router.get('/live', async (req, res) => {
     let matchplay = [];
     try {
       const { MatchPlayChampionship, MatchPlayMatch, User } = require('../models');
+      const { Op } = require('sequelize');
+      const freeLive = await MatchPlayMatch.findAll({
+        where: {
+          championship_id: { [Op.is]: null },
+          is_bye: false,
+          status: 'in_progress',
+        },
+        include: [
+          { model: User, as: 'playerA', attributes: ['id', 'first_name', 'last_name'] },
+          { model: User, as: 'playerB', attributes: ['id', 'first_name', 'last_name'] },
+        ],
+        order: [['createdAt', 'DESC']],
+        limit: 20,
+      });
+      if (freeLive.length) {
+        matchplay.push({
+          id: 'libre',
+          name: 'Match play libre',
+          format: 'libre',
+          matches_open: freeLive.length,
+          matches: freeLive.map((m) => ({
+            id: m.id,
+            holes_won_a: m.holes_won_a,
+            holes_won_b: m.holes_won_b,
+            playerA: m.playerA,
+            playerB: m.playerB,
+          })),
+        });
+      }
       const champs = await MatchPlayChampionship.findAll({
         where: { status: 'in_progress' },
         order: [['createdAt', 'DESC']],
