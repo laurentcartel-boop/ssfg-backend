@@ -1,4 +1,14 @@
 require('dotenv').config();
+
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'ssfg-footgolf-secret-change-me') {
+  console.error('FATAL: JWT_SECRET manquant ou valeur par défaut. Définis-le dans Railway.');
+  process.exit(1);
+}
+if (!process.env.DELETE_TEST_PIN || process.env.DELETE_TEST_PIN === 'SSFG-TEST') {
+  console.error('FATAL: DELETE_TEST_PIN manquant ou valeur par défaut. Définis-le dans Railway.');
+  process.exit(1);
+}
+
 const express = require('express');
 const cors = require('cors');
 const { sequelize } = require('./models');
@@ -38,7 +48,7 @@ app.use('/api/matchplay', require('./routes/matchplay'));
 try {
   app.use('/api/marcassins', require('./routes/marcassins'));
 } catch (e) {
-  console.warn('Route Marcassins absente:', e.message);
+  console.warn('⚠️ Route Marcassins absente:', e.message);
 }
 
 app.use((err, req, res, next) => {
@@ -49,8 +59,10 @@ app.use((err, req, res, next) => {
 });
 
 async function migrateMatchPlay() {
+  const qi = sequelize.getQueryInterface();
   const [tables] = await sequelize.query("SHOW TABLES LIKE 'matchplay_matches'");
   if (!tables.length) return;
+
   const [fks] = await sequelize.query(`
     SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
     WHERE TABLE_SCHEMA = DATABASE()
@@ -60,31 +72,66 @@ async function migrateMatchPlay() {
   for (const row of fks) {
     const name = row.CONSTRAINT_NAME || row.constraint_name;
     try {
-      await sequelize.query('ALTER TABLE matchplay_matches DROP FOREIGN KEY `' + name + '`');
-    } catch (e) {}
+      await sequelize.query(`ALTER TABLE matchplay_matches DROP FOREIGN KEY \`${name}\``);
+      console.log('FK dropped:', name);
+    } catch (e) {
+      console.warn('FK drop skip:', name, e.message);
+    }
   }
-  try { await sequelize.query('ALTER TABLE matchplay_matches MODIFY player_a_id CHAR(36) NULL'); } catch (e) {}
-  try { await sequelize.query('ALTER TABLE matchplay_matches MODIFY player_b_id CHAR(36) NULL'); } catch (e) {}
-  try { await sequelize.query("ALTER TABLE matchplay_matches ADD COLUMN is_bye TINYINT(1) NOT NULL DEFAULT 0"); } catch (e) {}
+
+  try {
+    await sequelize.query('ALTER TABLE matchplay_matches MODIFY player_a_id CHAR(36) NULL');
+  } catch (e) {
+    console.warn('player_a_id:', e.message);
+  }
+  try {
+    await sequelize.query('ALTER TABLE matchplay_matches MODIFY player_b_id CHAR(36) NULL');
+  } catch (e) {
+    console.warn('player_b_id:', e.message);
+  }
+  try {
+    await sequelize.query(
+      "ALTER TABLE matchplay_matches ADD COLUMN is_bye TINYINT(1) NOT NULL DEFAULT 0"
+    );
+  } catch (e) {}
 }
 
 async function promotePlatine() {
   const { User } = require('./models');
   const raw = process.env.PLATINE_EMAILS || process.env.PLATINE_EMAIL || '';
-  const emails = raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-  if (!emails.length) return;
+  const emails = raw
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  if (!emails.length) {
+    console.log('ℹ️ PLATINE_EMAILS non défini — aucun compte promu');
+    return;
+  }
   for (const email of emails) {
     const user = await User.findOne({ where: { email } });
-    if (!user) continue;
-    if (user.role !== 'platine_admin') await user.update({ role: 'platine_admin' });
+    if (!user) {
+      console.warn('⚠️ PLATINE: compte introuvable', email);
+      continue;
+    }
+    if (user.role !== 'platine_admin') {
+      await user.update({ role: 'platine_admin' });
+      console.log('✅ Admin Platine :', email);
+    }
   }
 }
 
 async function seedClubs() {
-  const { Club, User } = require('./models');
-  try { await sequelize.query('ALTER TABLE users ADD COLUMN club_id CHAR(36) NULL'); } catch (e) {}
+  const { Club } = require('./models');
+
+  try {
+    await sequelize.query(
+      'ALTER TABLE users ADD COLUMN club_id CHAR(36) NULL'
+    );
+    console.log('➕ users.club_id');
+  } catch (e) {}
+
   const defaults = [
-    { code: 'SSFG', name: 'Saint-Saens FootGolf', short_name: 'SSFG', sort_order: 1 },
+    { code: 'SSFG', name: 'Saint-Saëns FootGolf', short_name: 'SSFG', sort_order: 1 },
     { code: 'AFG', name: 'AFG', short_name: 'AFG', sort_order: 2 },
     { code: 'HAC', name: 'HAC FootGolf', short_name: 'HAC', sort_order: 3 },
     { code: 'RMFC', name: 'RMFC', short_name: 'RMFC', sort_order: 4 },
@@ -92,16 +139,182 @@ async function seedClubs() {
   ];
   for (const d of defaults) {
     try {
-      await Club.findOrCreate({ where: { code: d.code }, defaults: { ...d, is_active: true } });
-    } catch (e) {}
+      await Club.findOrCreate({
+        where: { code: d.code },
+        defaults: { ...d, is_active: true },
+      });
+    } catch (e) {
+      console.warn('seed club', d.code, e.message);
+    }
   }
-  const ssfg = await Club.findOne({ where: { code: 'SSFG' } });
-  if (ssfg) await User.update({ club_id: ssfg.id }, { where: { club_id: null } });
+  const count = await Club.count();
+  console.log(`✅ Clubs en base: ${count}`);
+  console.log('✅ Clubs seed OK (pas de rattachement auto SSFG)');
 }
 
 async function start() {
   try {
     await sequelize.authenticate();
+    try { await sequelize.query('ALTER TABLE article_comments ADD COLUMN approved TINYINT(1) NOT NULL DEFAULT 0'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE article_comments ADD COLUMN author_name VARCHAR(80) NULL'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE article_comments ADD COLUMN parent_id CHAR(36) NULL'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE article_comments MODIFY user_id CHAR(36) NULL'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE article_likes ADD COLUMN guest_key VARCHAR(64) NULL'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE article_likes MODIFY user_id CHAR(36) NULL'); } catch (e) {}
+    try { await sequelize.query('UPDATE article_comments SET approved = 1 WHERE user_id IS NOT NULL'); } catch (e) {}
+    console.log('✅ Connexion base de données OK');
+
+    try {
+      const [cols] = await sequelize.query(
+        "SHOW COLUMNS FROM round_comments LIKE 'createdAt'"
+      );
+      if (!cols.length) {
+        await sequelize.query('DROP TABLE IF EXISTS round_comments');
+        console.log('♻️  round_comments recreée (timestamps manquants)');
+      } else {
+        try {
+          await sequelize.query(
+            'ALTER TABLE round_comments ADD COLUMN display_name VARCHAR(40) NULL'
+          );
+        } catch (e) {}
+        try {
+          await sequelize.query(
+            'ALTER TABLE round_comments MODIFY user_id CHAR(36) NULL'
+          );
+        } catch (e) {}
+      }
+    } catch (e) {}
+
+    try {
+      await sequelize.query(
+        'ALTER TABLE accounting_entries ADD COLUMN attachment_url LONGTEXT NULL'
+      );
+      console.log('➕ accounting_entries.attachment_url');
+    } catch (e) {}
+    try {
+      await sequelize.query(
+        'ALTER TABLE competitions ADD COLUMN launched_at DATETIME NULL'
+      );
+      console.log('➕ competitions.launched_at');
+    } catch (e) {}
+    try {
+      await sequelize.query(
+        "ALTER TABLE competitions ADD COLUMN scope_type ENUM('club','interclub','open') NOT NULL DEFAULT 'open'"
+      );
+      console.log('➕ competitions.scope_type');
+    } catch (e) {}
+    try {
+      await sequelize.query(
+        'ALTER TABLE competitions ADD COLUMN club_id CHAR(36) NULL'
+      );
+      console.log('➕ competitions.club_id');
+    } catch (e) {}
+    try {
+      await sequelize.query(
+        "ALTER TABLE matchplay_championships ADD COLUMN scope_type ENUM('club','interclub','open') NOT NULL DEFAULT 'open'"
+      );
+      console.log('➕ matchplay scope_type');
+    } catch (e) {}
+    try {
+      await sequelize.query(
+        'ALTER TABLE matchplay_championships ADD COLUMN club_id CHAR(36) NULL'
+      );
+      console.log('➕ matchplay club_id');
+    } catch (e) {}
+
+    try {
+      await sequelize.sync();
+      await seedClubs();
+      try {
+        await sequelize.query(
+          'ALTER TABLE accounting_entries ADD COLUMN club_id CHAR(36) NULL'
+        );
+        console.log('➕ accounting club_id');
+      } catch (e) {}
+      try {
+        await sequelize.query(
+          'ALTER TABLE invoices ADD COLUMN club_id CHAR(36) NULL'
+        );
+        console.log('➕ invoices club_id');
+      } catch (e) {}
+      try {
+        const [ssfgInv] = await sequelize.query(
+          "SELECT id FROM clubs WHERE code = 'SSFG' LIMIT 1"
+        );
+        const sidInv = ssfgInv && ssfgInv[0] && ssfgInv[0].id;
+        if (sidInv) {
+          await sequelize.query(
+            'UPDATE invoices SET club_id = :sid WHERE club_id IS NULL',
+            { replacements: { sid: sidInv } }
+          );
+          console.log('✅ factures existantes → SSFG');
+        }
+      } catch (e) {
+        console.warn('migrate invoices club', e.message);
+      }
+      try {
+        const [ssfg] = await sequelize.query(
+          "SELECT id FROM clubs WHERE code = 'SSFG' LIMIT 1"
+        );
+        const sid = ssfg && ssfg[0] && ssfg[0].id;
+        if (sid) {
+          await sequelize.query(
+            'UPDATE accounting_entries SET club_id = :sid WHERE club_id IS NULL',
+            { replacements: { sid } }
+          );
+          console.log('✅ écritures existantes → SSFG');
+        }
+      } catch (e) {
+        console.warn('migrate accounting club', e.message);
+      }
+      await promotePlatine();
+      console.log('✅ sequelize.sync OK');
+    } catch (syncErr) {
+      console.error('❌ sequelize.sync:', syncErr);
+      throw syncErr;
+    }
+    try {
+      await migrateMatchPlay();
+    } catch (migErr) {
+      console.warn('⚠️ migrateMatchPlay:', migErr.message || migErr);
+    }
+    try {
+      await sequelize.query(
+        'ALTER TABLE marcassins_teams ADD COLUMN morning_round_id CHAR(36) NULL'
+      );
+    } catch (e) {}
+    try {
+      await sequelize.query(
+        'ALTER TABLE marcassins_teams ADD COLUMN afternoon_round_id CHAR(36) NULL'
+      );
+    } catch (e) {}
+    try {
+      await sequelize.query(
+        'ALTER TABLE rounds ADD COLUMN under_investigation TINYINT(1) NOT NULL DEFAULT 0'
+      );
+    } catch (e) {}
+    try {
+      await sequelize.query(
+        'ALTER TABLE rounds ADD COLUMN investigation_note VARCHAR(255) NULL'
+      );
+    } catch (e) {}
+    try {
+      await sequelize.query(
+        "ALTER TABLE users MODIFY COLUMN role ENUM('joueur','admin','super_admin','platine_admin') NOT NULL DEFAULT 'joueur'"
+      );
+    } catch (e) {
+      console.warn('ALTER role', e.message);
+    }
+    try {
+      await sequelize.query(
+        'ALTER TABLE rounds ADD COLUMN scoring_user_id CHAR(36) NULL'
+      );
+    } catch (e) {}
+    try {
+      await sequelize.query(
+        'ALTER TABLE round_players ADD COLUMN counts_for_index TINYINT(1) NOT NULL DEFAULT 1'
+      );
+    } catch (e) {}
     try { await sequelize.query('ALTER TABLE users ADD COLUMN notify_actu TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE users ADD COLUMN notify_chat_inter TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE users ADD COLUMN notify_chat_club TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
@@ -109,39 +322,15 @@ async function start() {
     try { await sequelize.query('ALTER TABLE users ADD COLUMN card_nickname VARCHAR(40) NULL'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE users ADD COLUMN card_bio VARCHAR(280) NULL'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE users ADD COLUMN card_photo LONGTEXT NULL'); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE round_players ADD COLUMN counts_for_index TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE article_comments ADD COLUMN approved TINYINT(1) NOT NULL DEFAULT 0'); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE article_comments ADD COLUMN author_name VARCHAR(80) NULL'); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE article_comments ADD COLUMN parent_id CHAR(36) NULL'); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE article_comments MODIFY user_id CHAR(36) NULL'); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE article_likes ADD COLUMN guest_key VARCHAR(64) NULL'); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE article_likes MODIFY user_id CHAR(36) NULL'); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE round_comments ADD COLUMN createdAt DATETIME NULL'); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE round_comments ADD COLUMN updatedAt DATETIME NULL'); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE round_comments ADD COLUMN display_name VARCHAR(40) NULL'); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE round_comments MODIFY user_id CHAR(36) NULL'); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE accounting_entries ADD COLUMN attachment_url LONGTEXT NULL'); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE competitions ADD COLUMN launched_at DATETIME NULL'); } catch (e) {}
-    try { await sequelize.query("ALTER TABLE competitions ADD COLUMN scope_type ENUM('club','interclub','open') NOT NULL DEFAULT 'open'"); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE competitions ADD COLUMN club_id CHAR(36) NULL'); } catch (e) {}
-    try { await sequelize.query("ALTER TABLE matchplay_championships ADD COLUMN scope_type ENUM('club','interclub','open') NOT NULL DEFAULT 'open'"); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE matchplay_championships ADD COLUMN club_id CHAR(36) NULL'); } catch (e) {}
-    await sequelize.sync();
-    await seedClubs();
-    try { await sequelize.query('ALTER TABLE accounting_entries ADD COLUMN club_id CHAR(36) NULL'); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE invoices ADD COLUMN club_id CHAR(36) NULL'); } catch (e) {}
-    await promotePlatine();
-    try { await migrateMatchPlay(); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE rounds ADD COLUMN under_investigation TINYINT(1) NOT NULL DEFAULT 0'); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE rounds ADD COLUMN investigation_note VARCHAR(255) NULL'); } catch (e) {}
-    try { await sequelize.query("ALTER TABLE users MODIFY COLUMN role ENUM('joueur','admin','super_admin','platine_admin') NOT NULL DEFAULT 'joueur'"); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE rounds ADD COLUMN scoring_user_id CHAR(36) NULL'); } catch (e) {}
-    console.log('Tables synchronisees');
+    console.log('✅ Tables synchronisées');
+
     app.listen(PORT, () => {
-      console.log('Serveur demarre sur le port', PORT);
+      console.log(`🚀 Serveur démarré sur le port ${PORT}`);
     });
   } catch (err) {
-    console.error('Impossible de demarrer:', err && err.message ? err.message : err);
+    console.error('❌ Impossible de démarrer:', err && err.message ? err.message : err);
+    if (err && err.stack) console.error(err.stack);
+    if (err && err.parent) console.error('SQL:', err.parent.message || err.parent);
     process.exit(1);
   }
 }
