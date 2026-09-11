@@ -25,6 +25,14 @@ const Article = sequelize.define(
       type: DataTypes.TEXT('long'),
       allowNull: true,
     },
+    link_url: {
+      type: DataTypes.STRING(500),
+      allowNull: true,
+    },
+    link_label: {
+      type: DataTypes.STRING(80),
+      allowNull: true,
+    },
     published: {
       type: DataTypes.BOOLEAN,
       defaultValue: false,
