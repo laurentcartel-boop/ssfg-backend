@@ -12,7 +12,7 @@ router.delete('/:id/registrations/:userId', requireRole('super_admin', 'platine_
 router.patch('/:id/forced-groups', requireRole('super_admin', 'platine_admin'), competitionController.setForcedGroups);
 router.post('/:id/compose-squads', requireRole('admin', 'super_admin', 'platine_admin'), competitionController.composeSquads);
 router.get('/:id', competitionController.getCompetition);
-router.post('/', requireRole('admin', 'super_admin', 'platine_admin'), competitionController.createCompetition);
+router.post('/', requireRole('super_admin', 'platine_admin'), competitionController.createCompetition);
 router.post('/:id/squads', requireRole('admin', 'super_admin', 'platine_admin'), competitionController.addSquad);
 router.patch('/:id/squads/:squadId', requireRole('admin', 'super_admin', 'platine_admin'), competitionController.updateSquad);
 router.delete('/:id/squads/:squadId', requireRole('admin', 'super_admin', 'platine_admin'), competitionController.deleteSquad);

@@ -5,6 +5,7 @@ const { authenticate, requireRole } = require('../middleware/auth');
 
 // Public
 router.post('/login', authController.login);
+router.post('/forgot-password', authController.forgotPassword);
 
 // Authenticated
 router.get('/me', authenticate, authController.me);
