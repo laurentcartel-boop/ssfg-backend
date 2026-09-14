@@ -3,15 +3,24 @@ const router = express.Router();
 const authController = require('../controllers/authController');
 const { authenticate, requireRole } = require('../middleware/auth');
 
-// Public
 router.post('/login', authController.login);
 router.post('/forgot-password', authController.forgotPassword);
 
-// Authenticated
 router.get('/me', authenticate, authController.me);
 router.post('/change-password', authenticate, authController.changePassword);
 
-// Super-admin only (création de comptes)
 router.post('/register', authenticate, requireRole('super_admin', 'platine_admin'), authController.register);
+router.get(
+  '/password-requests',
+  authenticate,
+  requireRole('super_admin', 'platine_admin'),
+  authController.listPasswordRequests
+);
+router.post(
+  '/password-requests/:id/done',
+  authenticate,
+  requireRole('super_admin', 'platine_admin'),
+  authController.markPasswordRequest
+);
 
 module.exports = router;
