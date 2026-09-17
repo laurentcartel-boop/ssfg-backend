@@ -26,22 +26,24 @@ function badge(user, stats) {
   if (idx < 0) return 'Master';
   if ((stats.hio || 0) + (stats.albatross || 0) > 0) return 'Excellent';
   if ((stats.eagle || 0) >= 2) return 'Performer';
-  if ((stats.holes || 0) >= 36 && idx <= 5) return 'Regulier';
-  if (idx > 5) return 'En progres';
+  if ((stats.holes || 0) >= 36 && idx <= 5) return 'Régulier';
+  if (idx > 5) return 'En progrès';
   return 'Joueur';
 }
 
 async function statsByUser() {
   const rows = await HoleScore.findAll({
-    include: [{
-      model: RoundPlayer,
-      as: 'roundPlayer',
-      required: true,
-      include: [
-        { model: Round, as: 'round', required: true, attributes: ['id', 'status'] },
-        { model: User, as: 'user', required: true, attributes: ['id'] },
-      ],
-    }],
+    include: [
+      {
+        model: RoundPlayer,
+        as: 'roundPlayer',
+        required: true,
+        include: [
+          { model: Round, as: 'round', required: true, attributes: ['id', 'status'] },
+          { model: User, as: 'user', required: true, attributes: ['id'] },
+        ],
+      },
+    ],
     limit: 40000,
   });
   const map = {};
@@ -66,7 +68,9 @@ function cardJson(u, stats) {
     last_name: u.last_name,
     index_value: u.index_value,
     is_rookie: u.is_rookie,
-    club: u.club ? { id: u.club.id, code: u.club.code, short_name: u.club.short_name || u.club.code } : { id: null, code: 'NONE', short_name: 'Sans club' },
+    club: u.club
+      ? { id: u.club.id, code: u.club.code, short_name: u.club.short_name || u.club.code }
+      : { id: null, code: 'NONE', short_name: 'Sans club' },
     nickname: u.card_nickname || null,
     bio: u.card_bio || null,
     photo_url: u.card_photo || null,
@@ -86,7 +90,9 @@ async function listAlbum(req, res) {
     });
     const stats = await statsByUser();
     let cards = users.map((u) => cardJson(u, stats[u.id]));
-    if (club && club !== 'all') cards = cards.filter((c) => String(c.club.code || 'NONE') === club);
+    if (club && club !== 'all') {
+      cards = cards.filter((c) => String(c.club.code || 'NONE') === club);
+    }
     cards.sort((a, b) => Number(a.index_value) - Number(b.index_value));
     res.json({ cards });
   } catch (err) {
@@ -100,17 +106,25 @@ async function updateMyCard(req, res) {
     const targetId = req.params.id && req.params.id !== 'me' ? req.params.id : req.user.id;
     const isSelf = targetId === req.user.id;
     const isPlatine = ['platine_admin', 'super_admin'].includes(req.user.role);
-    if (!isSelf && !isPlatine) return res.status(403).json({ error: 'Tu ne peux modifier que ta fiche' });
+    if (!isSelf && !isPlatine) {
+      return res.status(403).json({ error: 'Tu ne peux modifier que ta fiche' });
+    }
     const user = await User.findByPk(targetId);
     if (!user) return res.status(404).json({ error: 'Joueur introuvable' });
     const data = {};
     if (req.body.nickname != null) data.card_nickname = String(req.body.nickname).slice(0, 40);
     if (req.body.bio != null) data.card_bio = String(req.body.bio).slice(0, 280);
-    if (req.body.photo_url !== undefined) data.card_photo = req.body.photo_url || null;
+    if (req.body.clear_photo) {
+      data.card_photo = null;
+    } else if (req.body.photo_url) {
+      data.card_photo = String(req.body.photo_url);
+    }
     await user.update(data);
-    const fresh = await User.findByPk(user.id, { include: [{ model: Club, as: 'club', required: false }] });
+    const fresh = await User.findByPk(user.id, {
+      include: [{ model: Club, as: 'club', required: false }],
+    });
     const stats = await statsByUser();
-    res.json({ card: cardJson(fresh, stats[fresh.id]), message: 'Fiche mise a jour' });
+    res.json({ card: cardJson(fresh, stats[fresh.id]), message: 'Fiche mise à jour' });
   } catch (err) {
     console.error('updateMyCard', err);
     res.status(500).json({ error: err.message || 'Erreur serveur' });
