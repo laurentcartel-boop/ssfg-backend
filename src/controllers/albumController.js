@@ -48,9 +48,7 @@ async function statsByUser() {
   });
   const map = {};
   rows.forEach((hs) => {
-    const st = hs.roundPlayer && hs.roundPlayer.round && hs.roundPlayer.round.status;
-    if (st && st !== 'closed') return;
-    const uid = hs.roundPlayer.user && hs.roundPlayer.user.id;
+    const uid = hs.roundPlayer && hs.roundPlayer.user && hs.roundPlayer.user.id;
     if (!uid) return;
     if (!map[uid]) map[uid] = emptyStats();
     const k = classify(hs.score, hs.par);
