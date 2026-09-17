@@ -1,4 +1,5 @@
-const { User, Club, HoleScore, RoundPlayer, Round } = require('../models');
+const { User, Club } = require('../models');
+const sequelize = require('../config/database');
 
 function classify(score, par) {
   const s = Number(score);
@@ -32,23 +33,14 @@ function badge(user, stats) {
 }
 
 async function statsByUser() {
-  const rows = await HoleScore.findAll({
-    include: [
-      {
-        model: RoundPlayer,
-        as: 'roundPlayer',
-        required: true,
-        include: [
-          { model: Round, as: 'round', required: true, attributes: ['id', 'status'] },
-          { model: User, as: 'user', required: true, attributes: ['id'] },
-        ],
-      },
-    ],
-    limit: 40000,
-  });
+  const [rows] = await sequelize.query(`
+    SELECT rp.user_id AS user_id, hs.score AS score, hs.par AS par
+    FROM hole_scores hs
+    INNER JOIN round_players rp ON rp.id = hs.round_player_id
+  `);
   const map = {};
-  rows.forEach((hs) => {
-    const uid = hs.roundPlayer && hs.roundPlayer.user && hs.roundPlayer.user.id;
+  (rows || []).forEach((hs) => {
+    const uid = hs.user_id ? String(hs.user_id) : '';
     if (!uid) return;
     if (!map[uid]) map[uid] = emptyStats();
     const k = classify(hs.score, hs.par);
@@ -87,7 +79,7 @@ async function listAlbum(req, res) {
       order: [['last_name', 'ASC'], ['first_name', 'ASC']],
     });
     const stats = await statsByUser();
-    let cards = users.map((u) => cardJson(u, stats[u.id]));
+    let cards = users.map((u) => cardJson(u, stats[String(u.id)]));
     if (club && club !== 'all') {
       cards = cards.filter((c) => String(c.club.code || 'NONE') === club);
     }
@@ -122,7 +114,7 @@ async function updateMyCard(req, res) {
       include: [{ model: Club, as: 'club', required: false }],
     });
     const stats = await statsByUser();
-    res.json({ card: cardJson(fresh, stats[fresh.id]), message: 'Fiche mise à jour' });
+    res.json({ card: cardJson(fresh, stats[String(fresh.id)]), message: 'Fiche mise à jour' });
   } catch (err) {
     console.error('updateMyCard', err);
     res.status(500).json({ error: err.message || 'Erreur serveur' });
