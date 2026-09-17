@@ -330,6 +330,14 @@ async function importHelloAsso(req, res) {
       } else {
         existing = byName.get(rowKey(r)) || null;
       }
+      if (!existing) {
+        existing =
+          existingUsers.find(
+            (u) =>
+              norm(u.last_name) === norm(r.last_name) &&
+              norm(u.first_name) === norm(r.first_name)
+          ) || null;
+      }
 
       if (!existing && !emailToUse) {
         // email synthétique unique (contrainte NOT NULL + unique)
