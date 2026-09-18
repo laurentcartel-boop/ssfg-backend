@@ -299,10 +299,15 @@ async function updateHoleScores(req, res) {
       await round.update({ scoring_user_id: req.user.id }, { transaction: t });
     }
 
-    const holePar = round.course.holes_data.find((h) => h.hole === hole_number)?.par;
+    const holesData = Array.isArray(round.course?.holes_data) ? round.course.holes_data : [];
+    const holeNum = Number(hole_number);
+    const holeDef =
+      holesData.find((h) => Number(h.hole ?? h.hole_number ?? h.n) === holeNum) ||
+      holesData[holeNum - 1];
+    const holePar = Number(holeDef?.par);
     if (!holePar) {
       await t.rollback();
-      return res.status(400).json({ error: 'Par du trou introuvable' });
+      return res.status(400).json({ error: `Par du trou ${holeNum} introuvable` });
     }
 
     const results = [];
@@ -314,7 +319,7 @@ async function updateHoleScores(req, res) {
         return res.status(400).json({ error: 'Chaque score doit avoir user_id et score >= 1' });
       }
 
-      const rp = round.players.find((p) => p.user_id === user_id);
+      const rp = round.players.find((p) => String(p.user_id) === String(user_id));
       if (!rp) {
         await t.rollback();
         return res.status(400).json({ error: `Joueur ${user_id} absent de la partie` });
