@@ -314,6 +314,146 @@ async function clearRookie(req, res) {
   }
 }
 
+async function snapshotUser(id) {
+  const models = require('../models');
+  const u = await User.findByPk(id, {
+    attributes: { exclude: ['password_hash'] },
+    include: [{ model: Club, as: 'club', required: false }],
+  });
+  if (!u) return null;
+  const rp = await models.RoundPlayer.count({ where: { user_id: id } });
+  const ih = await models.IndexHistory.count({ where: { user_id: id } });
+  return {
+    id: u.id,
+    first_name: u.first_name,
+    last_name: u.last_name,
+    email: u.email,
+    role: u.role,
+    index_value: u.index_value,
+    is_rookie: u.is_rookie,
+    is_active: u.is_active,
+    club: u.club ? u.club.short_name || u.club.code : 'Sans club',
+    created_at: u.createdAt || u.created_at,
+    nickname: u.card_nickname,
+    has_photo: !!u.card_photo,
+    rounds: rp,
+    index_events: ih,
+  };
+}
+
+async function compareUsers(req, res) {
+  try {
+    if (!['platine_admin', 'super_admin'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'AdminPlatine uniquement' });
+    }
+    const a = req.query.a || req.query.keep_id;
+    const b = req.query.b || req.query.drop_id;
+    if (!a || !b || a === b) return res.status(400).json({ error: 'Deux joueurs distincts requis' });
+    const left = await snapshotUser(a);
+    const right = await snapshotUser(b);
+    if (!left || !right) return res.status(404).json({ error: 'Joueur introuvable' });
+    res.json({ a: left, b: right });
+  } catch (err) {
+    console.error('compareUsers', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function reassign(model, field, from, to) {
+  if (!model || !model.update) return 0;
+  try {
+    const [n] = await model.update({ [field]: to }, { where: { [field]: from } });
+    return n || 0;
+  } catch (e) {
+    console.warn('reassign', model.name || field, e.message);
+    return 0;
+  }
+}
+
+async function mergeUsers(req, res) {
+  try {
+    if (!['platine_admin', 'super_admin'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'AdminPlatine uniquement' });
+    }
+    const keepId = req.body.keep_id;
+    const dropId = req.body.drop_id;
+    if (!keepId || !dropId || keepId === dropId) {
+      return res.status(400).json({ error: 'keep_id et drop_id distincts requis' });
+    }
+    if (String(dropId) === String(req.user.id)) {
+      return res.status(400).json({ error: 'Tu ne peux pas fusionner ton compte connecté vers un autre' });
+    }
+    const keep = await User.findByPk(keepId);
+    const drop = await User.findByPk(dropId);
+    if (!keep || !drop) return res.status(404).json({ error: 'Joueur introuvable' });
+
+    const m = require('../models');
+    const moved = {};
+
+    // Inscriptions : si les deux sont inscrits, on jette le clone
+    if (m.CompetitionRegistration) {
+      const keepRegs = await m.CompetitionRegistration.findAll({ where: { user_id: keepId } });
+      const keepComp = new Set(keepRegs.map((r) => r.competition_id));
+      const dropRegs = await m.CompetitionRegistration.findAll({ where: { user_id: dropId } });
+      for (const r of dropRegs) {
+        if (keepComp.has(r.competition_id)) await r.destroy();
+        else await r.update({ user_id: keepId });
+      }
+      moved.competitions = dropRegs.length;
+    }
+    if (m.MarcassinsRegistration) {
+      const keepRegs = await m.MarcassinsRegistration.findAll({ where: { user_id: keepId } });
+      const keepEd = new Set(keepRegs.map((r) => r.edition_id));
+      const dropRegs = await m.MarcassinsRegistration.findAll({ where: { user_id: dropId } });
+      for (const r of dropRegs) {
+        if (keepEd.has(r.edition_id)) await r.destroy();
+        else await r.update({ user_id: keepId });
+      }
+    }
+
+    moved.rounds = await reassign(m.RoundPlayer, 'user_id', dropId, keepId);
+    moved.index_history = await reassign(m.IndexHistory, 'user_id', dropId, keepId);
+    moved.comments = await reassign(m.RoundComment, 'user_id', dropId, keepId);
+    moved.exploits = await reassign(m.RoundExploit, 'user_id', dropId, keepId);
+    moved.chat = await reassign(m.ChatMessage, 'user_id', dropId, keepId);
+    await reassign(m.ChatRead, 'user_id', dropId, keepId);
+    await reassign(m.ArticleComment, 'user_id', dropId, keepId);
+    await reassign(m.PushSubscription, 'user_id', dropId, keepId);
+    await reassign(m.Round, 'created_by', dropId, keepId);
+    await reassign(m.Round, 'scoring_user_id', dropId, keepId);
+    if (m.MarcassinsTeam) {
+      await reassign(m.MarcassinsTeam, 'player_a_id', dropId, keepId);
+      await reassign(m.MarcassinsTeam, 'player_b_id', dropId, keepId);
+    }
+    if (m.MatchPlayMatch) {
+      await reassign(m.MatchPlayMatch, 'player_a_id', dropId, keepId);
+      await reassign(m.MatchPlayMatch, 'player_b_id', dropId, keepId);
+    }
+
+    const cardPatch = {};
+    if (!keep.card_photo && drop.card_photo) cardPatch.card_photo = drop.card_photo;
+    if (!keep.card_nickname && drop.card_nickname) cardPatch.card_nickname = drop.card_nickname;
+    if (!keep.card_bio && drop.card_bio) cardPatch.card_bio = drop.card_bio;
+    if (Object.keys(cardPatch).length) await keep.update(cardPatch);
+
+    await drop.update({
+      is_active: false,
+      is_rookie: false,
+      email: `merged_${Date.now()}_${String(drop.email).slice(0, 80)}`,
+    });
+
+    res.json({
+      message: `${drop.last_name} ${drop.first_name} fusionné dans ${keep.last_name} ${keep.first_name}`,
+      keep_id: keep.id,
+      drop_id: drop.id,
+      moved,
+    });
+  } catch (err) {
+    console.error('mergeUsers', err);
+    res.status(500).json({ error: err.message || 'Erreur serveur' });
+  }
+}
+
 module.exports = {
   listClubs,
   listUsers,
@@ -322,4 +462,6 @@ module.exports = {
   deleteUser,
   listRookiesDue,
   clearRookie,
+  compareUsers,
+  mergeUsers,
 };
