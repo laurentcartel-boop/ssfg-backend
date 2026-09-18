@@ -40,7 +40,7 @@ async function listUsers(req, res) {
         },
       ],
       order: [['last_name', 'ASC'], ['first_name', 'ASC']],
-      attributes: { exclude: ['password_hash'] },
+      attributes: { exclude: ['password_hash', 'card_photo'] },
     });
 
     res.json({
@@ -223,20 +223,38 @@ async function deleteUser(req, res) {
       return res.status(403).json({ error: 'Impossible de supprimer un Admin Platine' });
     }
 
-    const { RoundPlayer } = require('../models');
-    const played = await RoundPlayer.count({ where: { user_id: user.id } });
-    if (played > 0) {
+    const models = require('../models');
+    const played = await models.RoundPlayer.count({ where: { user_id: user.id } });
+    const purge = req.query.purge === '1' || req.body?.purge === true;
+
+    if (played > 0 && !purge) {
       await user.update({
         is_active: false,
-        email: `deleted_${Date.now()}_${user.email}`,
+        email: user.email.startsWith('deleted_')
+          ? user.email
+          : `deleted_${Date.now()}_${user.email}`,
       });
       return res.json({
-        message: `${user.first_name} ${user.last_name} désactivé (${played} partie(s) conservées)`,
+        message: `${user.first_name} ${user.last_name} désactivé (${played} partie(s) conservées). Pour tout effacer : Effacer définitivement.`,
         soft: true,
+        played,
       });
     }
+
+    if (purge) {
+      const rps = await models.RoundPlayer.findAll({ where: { user_id: user.id } });
+      for (const rp of rps) {
+        if (models.HoleScore) {
+          await models.HoleScore.destroy({ where: { round_player_id: rp.id } });
+        }
+        await rp.destroy();
+      }
+    }
     await user.destroy();
-    res.json({ message: `${user.first_name} ${user.last_name} supprimé`, soft: false });
+    res.json({
+      message: `${user.first_name} ${user.last_name} supprimé définitivement`,
+      soft: false,
+    });
   } catch (err) {
     console.error('deleteUser', err);
     res.status(500).json({ error: 'Erreur serveur' });
