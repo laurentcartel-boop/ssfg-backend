@@ -1,0 +1,11 @@
+const express = require('express');
+const router = express.Router();
+const ctrl = require('../controllers/tribuneController');
+const { authenticate } = require('../middleware/auth');
+
+router.use(authenticate);
+router.get('/', ctrl.board);
+router.post('/eagles', ctrl.saveEagles);
+router.post('/bestioles', ctrl.saveBestioles);
+
+module.exports = router;
