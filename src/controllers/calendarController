@@ -1,0 +1,62 @@
+const { CalendarMonth } = require('../models');
+
+const MONTHS = [
+  'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+  'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre',
+];
+
+async function ensureYear(year) {
+  const existing = await CalendarMonth.findAll({ where: { year } });
+  const have = new Set(existing.map((r) => r.month));
+  for (let m = 1; m <= 12; m += 1) {
+    if (!have.has(m)) {
+      await CalendarMonth.create({ year, month: m, title: MONTHS[m - 1] });
+    }
+  }
+}
+
+async function list(req, res) {
+  try {
+    const year = Number(req.query.year) || 2027;
+    await ensureYear(year);
+    const rows = await CalendarMonth.findAll({
+      where: { year },
+      order: [['month', 'ASC']],
+    });
+    res.json({
+      year,
+      months: rows.map((r) => ({
+        id: r.id,
+        month: r.month,
+        label: MONTHS[r.month - 1],
+        title: r.title,
+        caption: r.caption,
+        photo_url: r.photo_url,
+        event_date: r.event_date,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function update(req, res) {
+  try {
+    const row = await CalendarMonth.findByPk(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Mois introuvable' });
+    const { title, caption, photo_url, event_date } = req.body;
+    await row.update({
+      title: title != null ? String(title).slice(0, 160) : row.title,
+      caption: caption != null ? String(caption) : row.caption,
+      photo_url: photo_url != null ? String(photo_url) : row.photo_url,
+      event_date: event_date || row.event_date,
+    });
+    res.json({ month: row });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+module.exports = { list, update };
