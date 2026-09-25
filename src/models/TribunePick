@@ -1,0 +1,21 @@
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
+
+const TribunePick = sequelize.define(
+  'TribunePick',
+  {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    year: { type: DataTypes.INTEGER, allowNull: false },
+    user_id: { type: DataTypes.UUID, allowNull: false },
+    kind: { type: DataTypes.STRING(30), allowNull: false },
+    target_id: { type: DataTypes.STRING(64), allowNull: false, defaultValue: 'year' },
+    payload: { type: DataTypes.JSON, allowNull: false, defaultValue: {} },
+    points: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+  },
+  {
+    tableName: 'tribune_picks',
+    indexes: [{ unique: true, fields: ['year', 'user_id', 'kind', 'target_id'] }],
+  }
+);
+
+module.exports = TribunePick;
