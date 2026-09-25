@@ -12,7 +12,7 @@ async function getIndexRanking(req, res) {
     const { series, club } = req.query;
 
     const users = await User.findAll({
-      where: { is_active: true, role: { [Op.in]: ['joueur', 'admin', 'super_admin'] } },
+      where: { is_active: true },
       attributes: ['id', 'first_name', 'last_name', 'index_value', 'gender', 'birth_date', 'is_rookie', 'last_round_date', 'club_id'],
       include: [{ model: Club, as: 'club', attributes: ['id', 'code', 'short_name', 'name'], required: false }],
       order: [['index_value', 'ASC']], // plus bas = meilleur
