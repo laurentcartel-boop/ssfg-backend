@@ -1,4 +1,5 @@
 const { CalendarMonth } = require('../models');
+const sequelize = require('../config/database');
 
 const MONTHS = [
   'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
@@ -6,6 +7,11 @@ const MONTHS = [
 ];
 
 async function ensureYear(year) {
+  try {
+    await sequelize.query('ALTER TABLE calendar_months MODIFY photo_url LONGTEXT');
+  } catch (e) {
+    /* table absente au premier boot, sync s’en charge */
+  }
   const existing = await CalendarMonth.findAll({ where: { year } });
   const have = new Set(existing.map((r) => r.month));
   for (let m = 1; m <= 12; m += 1) {
@@ -50,7 +56,7 @@ async function update(req, res) {
       title: title != null ? String(title).slice(0, 160) : row.title,
       caption: caption != null ? String(caption) : row.caption,
       photo_url: photo_url != null ? String(photo_url) : row.photo_url,
-      event_date: event_date || row.event_date,
+      event_date: event_date === undefined ? row.event_date : event_date || null,
     });
     res.json({ month: row });
   } catch (err) {
