@@ -373,6 +373,7 @@ async function addSquad(req, res) {
           round_id: round.id,
           user_id: userId,
           starting_index: user.index_value,
+          counts_for_index: !/scramble/i.test(String(competition.name || '')),
         },
         { transaction: t }
       );
@@ -1013,6 +1014,7 @@ async function composeSquads(req, res) {
             round_id: round.id,
             user_id: userId,
             starting_index: user.index_value,
+            counts_for_index: !/scramble/i.test(String(competition.name || '')),
           },
           { transaction: t }
         );
