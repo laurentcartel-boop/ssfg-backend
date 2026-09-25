@@ -758,6 +758,49 @@ async function deleteMatch(req, res) {
   }
 }
 
+async function listMatchComments(req, res) {
+  try {
+    const m = await MatchPlayMatch.findByPk(req.params.id);
+    if (!m) return res.status(404).json({ error: 'Match introuvable' });
+    res.json({ comments: m.comments_data || [] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+async function addMatchComment(req, res) {
+  try {
+    const m = await MatchPlayMatch.findByPk(req.params.id);
+    if (!m) return res.status(404).json({ error: 'Match introuvable' });
+    const message = String(req.body.message || '').trim().slice(0, 280);
+    if (!message) return res.status(400).json({ error: 'Message vide' });
+    const row = {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      user_id: req.user.id,
+      display_name: `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim(),
+      message,
+      created_at: new Date().toISOString(),
+    };
+    const comments = [...(m.comments_data || []), row];
+    await m.update({ comments_data: comments });
+    res.json({ comments });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+async function deleteMatchComment(req, res) {
+  try {
+    const m = await MatchPlayMatch.findByPk(req.params.id);
+    if (!m) return res.status(404).json({ error: 'Match introuvable' });
+    const comments = (m.comments_data || []).filter((c) => String(c.id) !== String(req.params.cid));
+    await m.update({ comments_data: comments });
+    res.json({ comments });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
 module.exports = {
   listMatches,
   getMatch,
@@ -774,4 +817,7 @@ module.exports = {
   deleteMatch,
   startMatch,
   forfeitMatch,
+  listMatchComments,
+  addMatchComment,
+  deleteMatchComment,
 };
