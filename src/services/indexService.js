@@ -85,14 +85,16 @@ function getIndexSeries(index) {
  */
 function getCategories(user) {
   const cats = [];
-  const today = new Date();
+  // Catégories d'âge = saison civile (1er janvier), pas l'anniversaire du jour.
+  const seasonYear = new Date().getFullYear();
+  const jan1 = new Date(seasonYear, 0, 1);
 
   let age = null;
   if (user.birth_date) {
     const birth = new Date(user.birth_date);
-    age = today.getFullYear() - birth.getFullYear();
-    const m = today.getMonth() - birth.getMonth();
-    if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+    age = jan1.getFullYear() - birth.getFullYear();
+    const m = jan1.getMonth() - birth.getMonth();
+    if (m < 0 || (m === 0 && jan1.getDate() < birth.getDate())) age--;
   }
 
   // Catégories exclusives par âge (un joueur n'apparaît que dans sa tranche)
