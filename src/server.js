@@ -16,13 +16,15 @@ const { sequelize } = require('./models');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// CORS – en production, restreindre aux domaines autorisés
 const allowedOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',').map((o) => o.trim())
-  : true;
+  : true; // true = toutes origines (dev)
 
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json({ limit: '15mb' }));
 
+// Routes
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', app: 'FootGolf Scoring SSFG', version: '1.0.0' });
 });
@@ -45,12 +47,15 @@ app.use('/api/chat', require('./routes/chat'));
 app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/accounting', require('./routes/accounting'));
 app.use('/api/matchplay', require('./routes/matchplay'));
+app.use('/api/calendar', require('./routes/calendar'));
+app.use('/api/tribune', require('./routes/tribune'));
 try {
   app.use('/api/marcassins', require('./routes/marcassins'));
 } catch (e) {
   console.warn('⚠️ Route Marcassins absente:', e.message);
 }
 
+// Error handler
 app.use((err, req, res, next) => {
   console.error(err);
   res.status(err.status || 500).json({
@@ -63,6 +68,7 @@ async function migrateMatchPlay() {
   const [tables] = await sequelize.query("SHOW TABLES LIKE 'matchplay_matches'");
   if (!tables.length) return;
 
+  // Drop foreign keys on player columns (bloque le NULL)
   const [fks] = await sequelize.query(`
     SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
     WHERE TABLE_SCHEMA = DATABASE()
@@ -79,6 +85,7 @@ async function migrateMatchPlay() {
     }
   }
 
+  // Nullable players + is_bye
   try {
     await sequelize.query('ALTER TABLE matchplay_matches MODIFY player_a_id CHAR(36) NULL');
   } catch (e) {
@@ -93,8 +100,12 @@ async function migrateMatchPlay() {
     await sequelize.query(
       "ALTER TABLE matchplay_matches ADD COLUMN is_bye TINYINT(1) NOT NULL DEFAULT 0"
     );
-  } catch (e) {}
+  } catch (e) {
+    // already exists
+  }
 }
+
+
 
 async function promotePlatine() {
   const { User } = require('./models');
@@ -121,14 +132,17 @@ async function promotePlatine() {
 }
 
 async function seedClubs() {
-  const { Club } = require('./models');
+  const { Club, User } = require('./models');
 
+  // Colonne club_id (sync sans alter ne l’ajoute pas sur table users existante)
   try {
     await sequelize.query(
       'ALTER TABLE users ADD COLUMN club_id CHAR(36) NULL'
     );
     console.log('➕ users.club_id');
-  } catch (e) {}
+  } catch (e) {
+    // déjà présente
+  }
 
   const defaults = [
     { code: 'SSFG', name: 'Saint-Saëns FootGolf', short_name: 'SSFG', sort_order: 1 },
@@ -164,6 +178,8 @@ async function start() {
     try { await sequelize.query('UPDATE article_comments SET approved = 1 WHERE user_id IS NOT NULL'); } catch (e) {}
     console.log('✅ Connexion base de données OK');
 
+    // Créer les tables manquantes sans alter (évite "Too many keys" MySQL)
+    // Si round_comments a été créée incomplète (sans timestamps), on la recrée
     try {
       const [cols] = await sequelize.query(
         "SHOW COLUMNS FROM round_comments LIKE 'createdAt'"
@@ -172,6 +188,7 @@ async function start() {
         await sequelize.query('DROP TABLE IF EXISTS round_comments');
         console.log('♻️  round_comments recreée (timestamps manquants)');
       } else {
+        // ajouter display_name / user_id nullable si besoin
         try {
           await sequelize.query(
             'ALTER TABLE round_comments ADD COLUMN display_name VARCHAR(40) NULL'
@@ -183,7 +200,9 @@ async function start() {
           );
         } catch (e) {}
       }
-    } catch (e) {}
+    } catch (e) {
+      // table absente → sync la créera
+    }
 
     try {
       await sequelize.query(
@@ -322,6 +341,8 @@ async function start() {
     try { await sequelize.query('ALTER TABLE users ADD COLUMN card_nickname VARCHAR(40) NULL'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE users ADD COLUMN card_bio VARCHAR(280) NULL'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE users ADD COLUMN card_photo LONGTEXT NULL'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE articles ADD COLUMN link_url VARCHAR(500) NULL'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE articles ADD COLUMN link_label VARCHAR(80) NULL'); } catch (e) {}
     console.log('✅ Tables synchronisées');
 
     app.listen(PORT, () => {
@@ -334,5 +355,6 @@ async function start() {
     process.exit(1);
   }
 }
+
 
 start();
