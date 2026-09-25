@@ -121,7 +121,8 @@ async function listMatches(req, res) {
     if (req.query.championship_id) {
       where.championship_id = req.query.championship_id;
     } else if (req.query.libre === '1') {
-      where.championship_id = null;
+      const { Op } = require('sequelize');
+      where.championship_id = { [Op.is]: null };
     }
     if (req.query.status) where.status = req.query.status;
 
@@ -762,7 +763,8 @@ async function listMatchComments(req, res) {
   try {
     const m = await MatchPlayMatch.findByPk(req.params.id);
     if (!m) return res.status(404).json({ error: 'Match introuvable' });
-    res.json({ comments: m.comments_data || [] });
+    const comments = (m.holes_data || []).filter((h) => h && h.type === 'comment');
+    res.json({ comments });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -781,9 +783,9 @@ async function addMatchComment(req, res) {
       message,
       created_at: new Date().toISOString(),
     };
-    const comments = [...(m.comments_data || []), row];
-    await m.update({ comments_data: comments });
-    res.json({ comments });
+    const holes = [...(m.holes_data || []), { type: 'comment', ...row }];
+    await m.update({ holes_data: holes });
+    res.json({ comments: holes.filter((h) => h && h.type === 'comment') });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -793,9 +795,9 @@ async function deleteMatchComment(req, res) {
   try {
     const m = await MatchPlayMatch.findByPk(req.params.id);
     if (!m) return res.status(404).json({ error: 'Match introuvable' });
-    const comments = (m.comments_data || []).filter((c) => String(c.id) !== String(req.params.cid));
-    await m.update({ comments_data: comments });
-    res.json({ comments });
+    const holes = (m.holes_data || []).filter((h) => !(h && h.type === 'comment' && String(h.id) === String(req.params.cid)));
+    await m.update({ holes_data: holes });
+    res.json({ comments: holes.filter((h) => h && h.type === 'comment') });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
