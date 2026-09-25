@@ -18,7 +18,14 @@ async function getIndexRanking(req, res) {
       order: [['index_value', 'ASC']], // plus bas = meilleur
     });
 
-    let ranked = users.map((u, i) => ({
+    let ranked = users
+      .filter((u) => {
+        const idx = Number(u.index_value);
+        const played = !!u.last_round_date;
+        if (!played && idx === 1) return false;
+        return true;
+      })
+      .map((u, i) => ({
       rank: i + 1,
       id: u.id,
       first_name: u.first_name,
@@ -85,6 +92,12 @@ async function getCategoryRanking(req, res) {
     });
 
     const ranked = users
+      .filter((u) => {
+        const idx = Number(u.index_value);
+        const played = !!u.last_round_date;
+        if (!played && idx === 1) return false;
+        return true;
+      })
       .map((u) => ({
         id: u.id,
         first_name: u.first_name,
