@@ -445,7 +445,11 @@ async function closeRound(req, res) {
       const scoreToPar = totalScore - parTotal;
       const netScore = Math.round((totalScore - Number(rp.starting_index)) * 10) / 10;
 
-      const isTraining = round.type === 'entrainement' || rp.counts_for_index === false;
+      const isScramble = /scramble/i.test(String(round.name || ''));
+      const isTraining =
+        round.type === 'entrainement' ||
+        rp.counts_for_index === false ||
+        isScramble;
       let change = 0;
       let newIndex = Number(rp.starting_index);
 
