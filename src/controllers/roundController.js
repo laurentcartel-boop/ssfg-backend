@@ -109,16 +109,21 @@ async function createRound(req, res) {
       return res.status(400).json({ error: 'name, course_id et date sont obligatoires' });
     }
 
-    if (!['libre', 'competition', 'entrainement'].includes(type)) {
+    if (!['libre', 'competition', 'entrainement', 'scramble'].includes(type)) {
       await t.rollback();
-      return res.status(400).json({ error: 'type doit être libre ou competition' });
+      return res.status(400).json({ error: 'type invalide' });
     }
 
-    const minPlayers = type === 'entrainement' ? 1 : 2;
+    const minPlayers = type === 'entrainement' ? 1 : type === 'scramble' ? 4 : 2;
     if (player_ids.length < minPlayers) {
       await t.rollback();
       return res.status(400).json({
-        error: type === 'entrainement' ? '1 joueur requis' : 'Minimum 2 joueurs requis',
+        error:
+          type === 'entrainement'
+            ? '1 joueur requis'
+            : type === 'scramble'
+              ? 'Scramble : 4 joueurs minimum'
+              : 'Minimum 2 joueurs requis',
       });
     }
 
@@ -137,10 +142,13 @@ async function createRound(req, res) {
       return res.status(400).json({ error: 'Un ou plusieurs joueurs sont invalides' });
     }
 
+    const storedType = type === 'scramble' ? 'libre' : type;
+    const storedName = type === 'scramble' && !/scramble/i.test(name) ? `Scramble · ${name.trim()}` : name.trim();
+
     const round = await Round.create(
       {
-        name: name.trim(),
-        type,
+        name: storedName,
+        type: storedType,
         course_id,
         date,
         status: 'in_progress',
@@ -152,7 +160,7 @@ async function createRound(req, res) {
     const indexSet = Array.isArray(index_player_ids) ? new Set(index_player_ids) : null;
     for (const player of players) {
       const counts =
-        type === 'entrainement'
+        type === 'entrainement' || type === 'scramble'
           ? false
           : indexSet
             ? indexSet.has(player.id)
