@@ -76,6 +76,11 @@ const MatchPlayMatch = sequelize.define(
       type: DataTypes.UUID,
       allowNull: false,
     },
+    comments_data: {
+      type: DataTypes.JSON,
+      allowNull: false,
+      defaultValue: [],
+    },
   },
   { tableName: 'matchplay_matches' }
 );
