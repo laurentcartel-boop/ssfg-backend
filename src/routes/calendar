@@ -1,0 +1,9 @@
+const express = require('express');
+const router = express.Router();
+const ctrl = require('../controllers/calendarController');
+const { authenticate, requireRole } = require('../middleware/auth');
+
+router.get('/', authenticate, ctrl.list);
+router.put('/:id', authenticate, requireRole('admin', 'super_admin', 'platine_admin'), ctrl.update);
+
+module.exports = router;
