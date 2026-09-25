@@ -1,0 +1,182 @@
+const { TribunePick, User, BestiolesSeason, BestiolesFixture, Club } = require('../models');
+
+const GAMES = ['simple1', 'simple2', 'fourball', 'scramble'];
+
+function encounterFromPicks(p) {
+  let h = 0;
+  let a = 0;
+  for (const k of GAMES) {
+    if (p[k] === 'home') h += 1;
+    else if (p[k] === 'away') a += 1;
+  }
+  return `${h}-${a}`;
+}
+
+function encounterFromFixture(fx) {
+  const scores = fx.scores || {};
+  let h = 0;
+  let a = 0;
+  let played = 0;
+  for (const k of GAMES) {
+    const w = scores[k]?.winner;
+    if (w === 'home') {
+      h += 1;
+      played += 1;
+    } else if (w === 'away') {
+      a += 1;
+      played += 1;
+    } else if (w === 'half') {
+      played += 1;
+    }
+  }
+  return { label: `${h}-${a}`, played, h, a, scores };
+}
+
+function scoreBestiolesPick(payload, fx) {
+  const actual = encounterFromFixture(fx);
+  if (!actual.played) return 0;
+  let pts = 0;
+  for (const k of GAMES) {
+    if (payload[k] && payload[k] === (fx.scores || {})[k]?.winner) pts += 1;
+  }
+  const pred = encounterFromPicks(payload);
+  if (pred === actual.label) pts += 2;
+  return pts;
+}
+
+async function board(req, res) {
+  try {
+    const year = Number(req.query.year) || 2027;
+    const picks = await TribunePick.findAll({
+      where: { year },
+      include: [{ model: User, as: 'user', attributes: ['id', 'first_name', 'last_name'] }],
+    });
+    const seasons = await BestiolesSeason.findAll({
+      where: { year },
+      include: [{ model: BestiolesFixture, as: 'fixtures', include: [
+        { model: Club, as: 'homeClub', attributes: ['id', 'code', 'short_name', 'name'] },
+        { model: Club, as: 'awayClub', attributes: ['id', 'code', 'short_name', 'name'] },
+      ] }],
+      order: [['createdAt', 'DESC']],
+    });
+    const fixtures = [];
+    for (const s of seasons) {
+      for (const fx of s.fixtures || []) {
+        fixtures.push({
+          id: fx.id,
+          season_id: s.id,
+          season_name: s.name,
+          day_number: fx.day_number,
+          play_date: fx.play_date,
+          status: fx.status,
+          home: fx.homeClub,
+          away: fx.awayClub,
+          open: fx.status === 'pending' || !fx.scores || !encounterFromFixture(fx).played,
+          result: encounterFromFixture(fx),
+        });
+      }
+    }
+
+    const mine = picks.filter((p) => p.user_id === req.user.id);
+    const byUser = {};
+    for (const p of picks) {
+      if (!byUser[p.user_id]) {
+        byUser[p.user_id] = {
+          user_id: p.user_id,
+          name: p.user ? `${p.user.first_name} ${p.user.last_name}` : '',
+          points: 0,
+          eagles: null,
+          badge: false,
+        };
+      }
+      let pts = p.points || 0;
+      if (p.kind === 'bestioles') {
+        const fx = (seasons.flatMap((s) => s.fixtures || [])).find((f) => f.id === p.target_id);
+        if (fx) pts = scoreBestiolesPick(p.payload || {}, fx);
+      }
+      byUser[p.user_id].points += pts;
+      if (p.kind === 'eagles') byUser[p.user_id].eagles = p.payload?.count ?? null;
+    }
+    const ranking = Object.values(byUser).sort((a, b) => b.points - a.points);
+    if (ranking[0] && ranking[0].points > 0) {
+      const top = ranking[0].points;
+      ranking.forEach((r) => {
+        r.badge = r.points === top;
+      });
+    }
+
+    res.json({
+      year,
+      my_eagles: mine.find((p) => p.kind === 'eagles')?.payload?.count ?? null,
+      my_picks: mine,
+      fixtures,
+      ranking,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function saveEagles(req, res) {
+  try {
+    const year = Number(req.body.year) || 2027;
+    const count = Number(req.body.count);
+    if (!Number.isFinite(count) || count < 0 || count > 500) {
+      return res.status(400).json({ error: 'Nombre d’eagles invalide' });
+    }
+    const existing = await TribunePick.findOne({
+      where: { year, user_id: req.user.id, kind: 'eagles', target_id: 'year' },
+    });
+    if (existing) return res.status(400).json({ error: 'Prono eagles déjà enregistré pour cette année' });
+    const row = await TribunePick.create({
+      year,
+      user_id: req.user.id,
+      kind: 'eagles',
+      target_id: 'year',
+      payload: { count },
+    });
+    res.json({ pick: row, message: 'Prono eagles enregistré' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+async function saveBestioles(req, res) {
+  try {
+    const fixture_id = req.body.fixture_id;
+    const picks = req.body.picks || {};
+    if (!fixture_id) return res.status(400).json({ error: 'Rencontre manquante' });
+    const fx = await BestiolesFixture.findByPk(fixture_id);
+    if (!fx) return res.status(404).json({ error: 'Rencontre introuvable' });
+    if (encounterFromFixture(fx).played) {
+      return res.status(400).json({ error: 'Pronos fermés : la rencontre a commencé / est jouée' });
+    }
+    for (const k of GAMES) {
+      if (!['home', 'away'].includes(picks[k])) {
+        return res.status(400).json({ error: `Choisis un club pour ${k}` });
+      }
+    }
+    const year = Number(req.body.year) || 2027;
+    let row = await TribunePick.findOne({
+      where: { year, user_id: req.user.id, kind: 'bestioles', target_id: fixture_id },
+    });
+    if (row) await row.update({ payload: picks });
+    else {
+      row = await TribunePick.create({
+        year,
+        user_id: req.user.id,
+        kind: 'bestioles',
+        target_id: fixture_id,
+        payload: picks,
+      });
+    }
+    res.json({ pick: row, message: 'Prono enregistré' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+module.exports = { board, saveEagles, saveBestioles };
