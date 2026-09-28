@@ -1,313 +1,124 @@
-const { Article, User } = require('../models');
+const { User, Club } = require('../models');
+const sequelize = require('../config/database');
 
-/** GET /api/articles — public : uniquement publiés */
-async function listPublic(req, res) {
-  try {
-    const articles = await Article.findAll({
-      where: { published: true },
-      include: [
-        { model: User, as: 'author', attributes: ['id', 'first_name', 'last_name'] },
-      ],
-      order: [['published_at', 'DESC'], ['created_at', 'DESC']],
-      limit: 50,
-    });
-    res.json({ articles });
-  } catch (err) {
-    console.error('listPublic articles:', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
+function classify(score, par) {
+  const s = Number(score);
+  const p = Number(par) || 4;
+  if (!s) return null;
+  if (s >= 10) return 'croix';
+  if (s === 1) return 'hio';
+  const d = s - p;
+  if (d <= -3) return 'albatross';
+  if (d === -2) return 'eagle';
+  if (d === -1) return 'birdie';
+  if (d === 0) return 'par';
+  if (d === 1) return 'bogey';
+  if (d === 2) return 'double';
+  return 'worse';
 }
 
-/** GET /api/articles/:id — public si publié, sinon admin */
-async function getOne(req, res) {
-  try {
-    const article = await Article.findByPk(req.params.id, {
-      include: [
-        { model: User, as: 'author', attributes: ['id', 'first_name', 'last_name'] },
-      ],
-    });
-    if (!article) return res.status(404).json({ error: 'Article introuvable' });
-    if (!article.published) {
-      const role = req.user?.role;
-      if (!role || !['admin', 'super_admin'].includes(role)) {
-        return res.status(404).json({ error: 'Article introuvable' });
-      }
-    }
-    res.json({ article });
-  } catch (err) {
-    console.error('getOne article:', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
+function emptyStats() {
+  return { holes: 0, hio: 0, albatross: 0, eagle: 0, birdie: 0, par: 0, bogey: 0, double: 0, worse: 0, croix: 0 };
 }
 
-/** GET /api/articles/admin/all — admin : tous */
-async function listAll(req, res) {
-  try {
-    const articles = await Article.findAll({
-      include: [
-        { model: User, as: 'author', attributes: ['id', 'first_name', 'last_name'] },
-      ],
-      order: [['created_at', 'DESC']],
-      limit: 100,
-    });
-    res.json({ articles });
-  } catch (err) {
-    console.error('listAll articles:', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
+function badge(user, stats) {
+  const idx = Number(user.index_value);
+  if (user.is_rookie) return 'Rookie';
+  if (idx < 0) return 'Master';
+  if ((stats.hio || 0) + (stats.albatross || 0) > 0) return 'Excellent';
+  if ((stats.eagle || 0) >= 2) return 'Performer';
+  if ((stats.holes || 0) >= 36 && idx <= 5) return 'Régulier';
+  if (idx > 5) return 'En progrès';
+  return 'Joueur';
 }
 
-/** POST /api/articles — admin */
-async function create(req, res) {
-  try {
-    const { title, body, excerpt, image_url, published, link_url, link_label } = req.body;
-    if (!title || !body) {
-      return res.status(400).json({ error: 'Titre et texte obligatoires' });
-    }
-    const isPub = Boolean(published);
-    const article = await Article.create({
-      title: title.trim(),
-      body: body.trim(),
-      excerpt: excerpt ? excerpt.trim() : title.trim().slice(0, 200),
-      image_url: image_url || null,
-      link_url: link_url ? String(link_url).trim() : null,
-      link_label: link_label ? String(link_label).trim().slice(0, 80) : null,
-      published: isPub,
-      published_at: isPub ? new Date() : null,
-      created_by: req.user.id,
-    });
-    res.status(201).json({ article, message: isPub ? 'Article publié' : 'Brouillon enregistré' });
-  } catch (err) {
-    console.error('create article:', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-}
-
-/** PUT /api/articles/:id — admin */
-async function update(req, res) {
-  try {
-    const article = await Article.findByPk(req.params.id);
-    if (!article) return res.status(404).json({ error: 'Article introuvable' });
-
-    const { title, body, excerpt, image_url, published, link_url, link_label } = req.body;
-    const data = {};
-    if (title != null) data.title = title.trim();
-    if (body != null) data.body = body.trim();
-    if (excerpt != null) data.excerpt = excerpt.trim();
-    if (image_url !== undefined) data.image_url = image_url || null;
-    if (link_url !== undefined) data.link_url = link_url ? String(link_url).trim() : null;
-    if (link_label !== undefined) data.link_label = link_label ? String(link_label).trim().slice(0, 80) : null;
-    if (published !== undefined) {
-      data.published = Boolean(published);
-      if (data.published && !article.published_at) data.published_at = new Date();
-      if (!data.published) data.published_at = null;
-    }
-    await article.update(data);
-    res.json({ article, message: 'Article mis à jour' });
-  } catch (err) {
-    console.error('update article:', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-}
-
-/** DELETE /api/articles/:id — admin */
-async function remove(req, res) {
-  try {
-    const article = await Article.findByPk(req.params.id);
-    if (!article) return res.status(404).json({ error: 'Article introuvable' });
-    await article.destroy();
-    res.json({ message: 'Article supprimé' });
-  } catch (err) {
-    console.error('delete article:', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-}
-
-
-async function engagement(articleId, userId, guestKey) {
-  const { ArticleLike, ArticleComment, User } = require('../models');
-  const likes = await ArticleLike.count({ where: { article_id: articleId } });
-  let liked = false;
-  if (userId) {
-    liked = Boolean(await ArticleLike.findOne({ where: { article_id: articleId, user_id: userId } }));
-  } else if (guestKey) {
-    liked = Boolean(await ArticleLike.findOne({ where: { article_id: articleId, guest_key: guestKey } }));
-  }
-  const comments = await ArticleComment.findAll({
-    where: { article_id: articleId, hidden: false, approved: true },
-    include: [{ model: User, as: 'user', attributes: ['id', 'first_name', 'last_name'], required: false }],
-    order: [['createdAt', 'ASC']],
-    limit: 100,
+async function statsByUser() {
+  const [rows] = await sequelize.query(`
+    SELECT rp.user_id AS user_id, hs.score AS score, hs.par AS par
+    FROM hole_scores hs
+    INNER JOIN round_players rp ON rp.id = hs.round_player_id
+  `);
+  const map = {};
+  (rows || []).forEach((hs) => {
+    const uid = hs.user_id ? String(hs.user_id) : '';
+    if (!uid) return;
+    if (!map[uid]) map[uid] = emptyStats();
+    const k = classify(hs.score, hs.par);
+    map[uid].holes += 1;
+    if (k) map[uid][k] += 1;
   });
-  return { likes_count: likes, liked, comments };
+  return map;
 }
 
-async function getEngagement(req, res) {
+function cardJson(u, stats) {
+  const s = stats || emptyStats();
+  return {
+    id: u.id,
+    first_name: u.first_name,
+    last_name: u.last_name,
+    index_value: u.index_value,
+    is_rookie: u.is_rookie,
+    club: u.club
+      ? { id: u.club.id, code: u.club.code, short_name: u.club.short_name || u.club.code }
+      : { id: null, code: 'NONE', short_name: 'Sans club' },
+    nickname: u.card_nickname || null,
+    bio: u.card_bio || null,
+    photo_url: u.card_photo || null,
+    stats: s,
+    badge: badge(u, s),
+  };
+}
+
+async function listAlbum(req, res) {
   try {
-    const data = await engagement(
-      req.params.id,
-      req.user?.id,
-      String(req.query.guest_key || req.body?.guest_key || '').slice(0, 64) || null
-    );
-    res.json(data);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-}
-
-async function toggleLike(req, res) {
-  try {
-    const { ArticleLike } = require('../models');
-    const article_id = req.params.id;
-    const user_id = req.user?.id || null;
-    const guest_key = String(req.body.guest_key || '').slice(0, 64) || null;
-    if (!user_id && !guest_key) {
-      return res.status(400).json({ error: 'Connexion ou jeton visiteur manquant' });
-    }
-    const existing = user_id
-      ? await ArticleLike.findOne({ where: { article_id, user_id } })
-      : await ArticleLike.findOne({ where: { article_id, guest_key } });
-    if (existing) await existing.destroy();
-    else await ArticleLike.create({ article_id, user_id, guest_key: user_id ? null : guest_key });
-    const data = await engagement(article_id, user_id);
-    if (!user_id) {
-      data.liked = !existing;
-    }
-    res.json(data);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-}
-
-async function canModerateSite(user) {
-  if (!user) return false;
-  if (user.role === 'super_admin') return true;
-  if (user.role !== 'platine_admin') return false;
-  const { Club } = require('../models');
-  if (!user.club_id) return false;
-  const club = await Club.findByPk(user.club_id);
-  return club && club.code === 'SSFG';
-}
-
-async function addComment(req, res) {
-  try {
-    const { ArticleComment } = require('../models');
-    const body = String(req.body.body || '').trim();
-    const author_name = String(req.body.author_name || req.body.name || '').trim().slice(0, 80);
-    if (body.length < 2) return res.status(400).json({ error: 'Commentaire trop court' });
-    if (body.length > 500) return res.status(400).json({ error: 'Max 500 caractères' });
-    if (!req.user && author_name.length < 2) {
-      return res.status(400).json({ error: 'Indique ton prénom / pseudo' });
-    }
-    const display = author_name || [req.user?.first_name, req.user?.last_name].filter(Boolean).join(' ');
-    let parent_id = req.body.parent_id || null;
-    if (parent_id) {
-      const parent = await ArticleComment.findByPk(parent_id);
-      if (!parent || parent.article_id !== req.params.id) {
-        return res.status(400).json({ error: 'Commentaire parent introuvable' });
-      }
-      if (parent.parent_id) parent_id = parent.parent_id;
-    }
-    const autoOk = await canModerateSite(req.user);
-    await ArticleComment.create({
-      article_id: req.params.id,
-      user_id: req.user?.id || null,
-      author_name: display || 'Visiteur',
-      body,
-      approved: !!autoOk,
-      hidden: false,
-      parent_id,
+    const club = String(req.query.club || 'all');
+    const users = await User.findAll({
+      where: { is_active: true },
+      include: [{ model: Club, as: 'club', required: false }],
+      attributes: { exclude: ['password_hash'] },
+      order: [['last_name', 'ASC'], ['first_name', 'ASC']],
     });
-    if (autoOk) {
-      const data = await engagement(req.params.id, req.user.id);
-      return res.status(201).json({ ...data, pending: false, message: 'Commentaire publié' });
+    const stats = await statsByUser();
+    let cards = users.map((u) => cardJson(u, stats[String(u.id)]));
+    if (club && club !== 'all') {
+      cards = cards.filter((c) => String(c.club.code || 'NONE') === club);
     }
-    try {
-      const { Article } = require('../models');
-      const art = await Article.findByPk(req.params.id, { attributes: ['title'] });
-      const { notifyPendingComment } = require('../utils/mailer');
-      notifyPendingComment({
-        articleTitle: art?.title,
-        author: display || 'Visiteur',
-        excerpt: body.slice(0, 200),
-      }).catch((e) => console.warn('mail pending comment', e.message));
-      const { notifyPlatine } = require('../utils/push');
-      notifyPlatine({
-        title: 'SSFG — commentaire à valider',
-        body: `${display || 'Visiteur'} : ${(body || '').slice(0, 80)}`,
-        url: '/scoring/admin/articles',
-      }).catch((e) => console.warn('push pending comment', e.message));
-    } catch (e) {
-      console.warn('mail pending comment', e.message);
-    }
-    res.status(201).json({
-      pending: true,
-      message: 'Commentaire envoyé. Il apparaîtra après validation.',
-    });
+    cards.sort((a, b) => Number(a.index_value) - Number(b.index_value));
+    res.json({ cards });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Erreur serveur' });
+    console.error('listAlbum', err);
+    res.status(500).json({ error: err.message || 'Erreur serveur' });
   }
 }
 
-async function listPendingComments(req, res) {
+async function updateMyCard(req, res) {
   try {
-    if (!(await canModerateSite(req.user))) {
-      return res.status(403).json({ error: 'Réservé à la modération SSFG' });
+    const targetId = req.params.id && req.params.id !== 'me' ? req.params.id : req.user.id;
+    const isSelf = targetId === req.user.id;
+    const isPlatine = ['platine_admin', 'super_admin'].includes(req.user.role);
+    if (!isSelf && !isPlatine) {
+      return res.status(403).json({ error: 'Tu ne peux modifier que ta fiche' });
     }
-    const { ArticleComment, Article, User } = require('../models');
-    const comments = await ArticleComment.findAll({
-      where: { approved: false, hidden: false },
-      include: [
-        { model: Article, as: 'article', attributes: ['id', 'title'], required: false },
-        { model: User, as: 'user', attributes: ['id', 'first_name', 'last_name'], required: false },
-      ],
-      order: [['createdAt', 'DESC']],
-      limit: 100,
+    const user = await User.findByPk(targetId);
+    if (!user) return res.status(404).json({ error: 'Joueur introuvable' });
+    const data = {};
+    if (req.body.nickname != null) data.card_nickname = String(req.body.nickname).slice(0, 40);
+    if (req.body.bio != null) data.card_bio = String(req.body.bio).slice(0, 280);
+    if (req.body.clear_photo) {
+      data.card_photo = null;
+    } else if (req.body.photo_url) {
+      data.card_photo = String(req.body.photo_url);
+    }
+    await user.update(data);
+    const fresh = await User.findByPk(user.id, {
+      include: [{ model: Club, as: 'club', required: false }],
     });
-    res.json({
-      count: comments.length,
-      comments,
-    });
+    const stats = await statsByUser();
+    res.json({ card: cardJson(fresh, stats[String(fresh.id)]), message: 'Fiche mise à jour' });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Erreur serveur' });
+    console.error('updateMyCard', err);
+    res.status(500).json({ error: err.message || 'Erreur serveur' });
   }
 }
 
-async function moderateComment(req, res) {
-  try {
-    if (!(await canModerateSite(req.user))) {
-      return res.status(403).json({ error: 'Réservé à la modération SSFG' });
-    }
-    const { ArticleComment } = require('../models');
-    const row = await ArticleComment.findByPk(req.params.commentId);
-    if (!row) return res.status(404).json({ error: 'Commentaire introuvable' });
-    const action = String(req.body.action || '').toLowerCase();
-    if (action === 'approve') await row.update({ approved: true, hidden: false });
-    else if (action === 'reject') await row.update({ approved: false, hidden: true });
-    else if (action === 'delete') await row.destroy();
-    else return res.status(400).json({ error: 'action approve, reject ou delete' });
-    res.json({ ok: true, id: row.id, approved: row.approved, hidden: row.hidden });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-}
-
-module.exports = {
-  listPublic,
-  getOne,
-  listAll,
-  create,
-  update,
-  remove,
-  getEngagement,
-  toggleLike,
-  addComment,
-  listPendingComments,
-  moderateComment,
-};
-
+module.exports = { listAlbum, updateMyCard };
