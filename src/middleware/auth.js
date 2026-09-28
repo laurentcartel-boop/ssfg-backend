@@ -35,6 +35,24 @@ async function authenticate(req, res, next) {
  * Vérifie que l'utilisateur a un des rôles autorisés
  * @param {...string} roles
  */
+/** Auth si token valide, sinon continue en visiteur (pas d’erreur 401). */
+async function optionalAuth(req, res, next) {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) {
+    req.user = null;
+    return next();
+  }
+  try {
+    const token = header.split(' ')[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const user = await User.findByPk(decoded.id);
+    req.user = user && user.is_active ? user : null;
+  } catch (err) {
+    req.user = null;
+  }
+  return next();
+}
+
 function requireRole(...roles) {
   return (req, res, next) => {
     if (!req.user) {
@@ -57,6 +75,7 @@ function generateToken(user) {
 
 module.exports = {
   authenticate,
+  optionalAuth,
   requireRole,
   generateToken,
   JWT_SECRET,
