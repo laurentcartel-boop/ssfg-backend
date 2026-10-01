@@ -283,7 +283,7 @@ async function getCompetition(req, res) {
  */
 async function createCompetition(req, res) {
   try {
-    let { name, course_id, date, scope_type = 'open', club_id = null } = req.body;
+    let { name, course_id, date, scope_type = 'open', club_id = null, played_holes = null } = req.body;
     if (!name || !course_id || !date) {
       return res.status(400).json({ error: 'name, course_id et date sont obligatoires' });
     }
@@ -306,6 +306,10 @@ async function createCompetition(req, res) {
     const course = await Course.findByPk(course_id);
     if (!course) return res.status(404).json({ error: 'Parcours non trouvé' });
 
+    const holes = Array.isArray(played_holes)
+      ? played_holes.map(Number).filter((n) => n >= 1 && n <= 18)
+      : null;
+
     const competition = await Competition.create({
       name: name.trim(),
       course_id,
@@ -314,6 +318,7 @@ async function createCompetition(req, res) {
       created_by: req.user.id,
       scope_type: scope,
       club_id: scope === 'club' ? club_id : null,
+      played_holes: holes && holes.length ? holes : null,
     });
 
     res.status(201).json({ competition, message: 'Compétition créée' });
@@ -361,6 +366,7 @@ async function addSquad(req, res) {
         status: competition.launched_at ? 'in_progress' : 'draft',
         created_by: req.user.id,
         competition_id: competition.id,
+        played_holes: competition.played_holes || null,
       },
       { transaction: t }
     );
@@ -373,7 +379,9 @@ async function addSquad(req, res) {
           round_id: round.id,
           user_id: userId,
           starting_index: user.index_value,
-          counts_for_index: !/scramble/i.test(String(competition.name || '')),
+          counts_for_index:
+            !/scramble|doublette|duo|mixte/i.test(String(competition.name || '')) &&
+            !(Array.isArray(competition.played_holes) && competition.played_holes.length > 0 && competition.played_holes.length < 18),
         },
         { transaction: t }
       );
@@ -1003,6 +1011,7 @@ async function composeSquads(req, res) {
           status: competition.launched_at ? 'in_progress' : 'draft',
           created_by: req.user.id,
           competition_id: competition.id,
+          played_holes: competition.played_holes || null,
         },
         { transaction: t }
       );
@@ -1014,7 +1023,9 @@ async function composeSquads(req, res) {
             round_id: round.id,
             user_id: userId,
             starting_index: user.index_value,
-            counts_for_index: !/scramble/i.test(String(competition.name || '')),
+            counts_for_index:
+            !/scramble|doublette|duo|mixte/i.test(String(competition.name || '')) &&
+            !(Array.isArray(competition.played_holes) && competition.played_holes.length > 0 && competition.played_holes.length < 18),
           },
           { transaction: t }
         );
