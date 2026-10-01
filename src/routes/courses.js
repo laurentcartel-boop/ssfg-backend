@@ -90,6 +90,7 @@ router.patch('/:id', requireRole('super_admin', 'platine_admin'), async (req, re
       const normalized = holes_data.map((h, i) => ({
         hole: h.hole || i + 1,
         par: Number(h.par),
+        active: h.active !== false,
       }));
       if (normalized.some((h) => !h.par || h.par < 3 || h.par > 6)) {
         return res.status(400).json({ error: 'Chaque par doit être entre 3 et 6' });
