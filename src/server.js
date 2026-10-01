@@ -337,7 +337,8 @@ async function start() {
     try { await sequelize.query('ALTER TABLE users ADD COLUMN notify_actu TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE users ADD COLUMN notify_chat_inter TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE users ADD COLUMN notify_chat_club TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
-    try { await sequelize.query('ALTER TABLE users ADD COLUMN notify_live TINYINT(1) NOT NULL DEFAULT 1'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE rounds ADD COLUMN played_holes JSON NULL'); } catch (e) {}
+    try { await sequelize.query('ALTER TABLE competitions ADD COLUMN played_holes JSON NULL'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE users ADD COLUMN card_nickname VARCHAR(40) NULL'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE users ADD COLUMN card_bio VARCHAR(280) NULL'); } catch (e) {}
     try { await sequelize.query('ALTER TABLE users ADD COLUMN card_photo LONGTEXT NULL'); } catch (e) {}
