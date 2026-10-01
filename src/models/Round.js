@@ -58,6 +58,11 @@ const Round = sequelize.define('Round', {
     type: DataTypes.UUID,
     allowNull: true,
   },
+  /** Trous joués (ex. [1,2,3,…]) — null = tous les trous actifs du parcours */
+  played_holes: {
+    type: DataTypes.JSON,
+    allowNull: true,
+  },
 }, {
   tableName: 'rounds',
 });
