@@ -415,11 +415,14 @@ async function closeRound(req, res) {
       return res.status(400).json({ error: 'Partie déjà clôturée' });
     }
 
+    const holesData = Array.isArray(round.course?.holes_data) ? round.course.holes_data : [];
+    const fromCourse = holesData.filter((h) => h.active !== false).map((h) => Number(h.hole)).filter(Boolean);
     const expected = Array.isArray(round.played_holes) && round.played_holes.length
       ? round.played_holes.map(Number)
-      : null;
+      : fromCourse.length
+        ? fromCourse
+        : null;
     const expectedCount = expected ? expected.length : 18;
-    const holesData = Array.isArray(round.course?.holes_data) ? round.course.holes_data : [];
     const parTotal = expected
       ? expected.reduce((sum, n) => {
           const found = holesData.find((h) => Number(h.hole) === n);
