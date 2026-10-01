@@ -51,6 +51,10 @@ const Competition = sequelize.define('Competition', {
     type: DataTypes.UUID,
     allowNull: true,
   },
+  played_holes: {
+    type: DataTypes.JSON,
+    allowNull: true,
+  },
 }, {
   tableName: 'competitions',
 });
