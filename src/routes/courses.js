@@ -47,13 +47,14 @@ router.post('/', requireRole('super_admin', 'platine_admin'), async (req, res) =
     const normalized = holes_data.map((h, i) => ({
       hole: h.hole || i + 1,
       par: Number(h.par),
+      active: h.active !== false,
     }));
 
     if (normalized.some((h) => !h.par || h.par < 3 || h.par > 6)) {
       return res.status(400).json({ error: 'Chaque par doit être entre 3 et 6' });
     }
 
-    const par_total = normalized.reduce((sum, h) => sum + h.par, 0);
+    const par_total = normalized.filter((h) => h.active !== false).reduce((sum, h) => sum + h.par, 0);
 
     const course = await Course.create({
       name: name.trim(),
@@ -94,7 +95,7 @@ router.patch('/:id', requireRole('super_admin', 'platine_admin'), async (req, re
         return res.status(400).json({ error: 'Chaque par doit être entre 3 et 6' });
       }
       updates.holes_data = normalized;
-      updates.par_total = normalized.reduce((sum, h) => sum + h.par, 0);
+      updates.par_total = normalized.filter((h) => h.active !== false).reduce((sum, h) => sum + h.par, 0);
     }
 
     await course.update(updates);
