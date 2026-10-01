@@ -102,7 +102,7 @@ async function getRound(req, res) {
 async function createRound(req, res) {
   const t = await sequelize.transaction();
   try {
-    const { name, type = 'libre', course_id, date, player_ids = [], index_player_ids } = req.body;
+    const { name, type = 'libre', course_id, date, player_ids = [], index_player_ids, played_holes } = req.body;
 
     if (!name || !course_id || !date) {
       await t.rollback();
@@ -145,6 +145,11 @@ async function createRound(req, res) {
     const storedType = type === 'scramble' ? 'libre' : type;
     const storedName = type === 'scramble' && !/scramble/i.test(name) ? `Scramble · ${name.trim()}` : name.trim();
 
+    const holes = Array.isArray(played_holes)
+      ? [...new Set(played_holes.map(Number).filter((n) => n >= 1 && n <= 18))].sort((a, b) => a - b)
+      : null;
+    const partialLayout = holes && holes.length > 0 && holes.length < 18;
+
     const round = await Round.create(
       {
         name: storedName,
@@ -153,6 +158,7 @@ async function createRound(req, res) {
         date,
         status: 'in_progress',
         created_by: req.user.id,
+        played_holes: holes && holes.length ? holes : null,
       },
       { transaction: t }
     );
@@ -160,7 +166,7 @@ async function createRound(req, res) {
     const indexSet = Array.isArray(index_player_ids) ? new Set(index_player_ids) : null;
     for (const player of players) {
       const counts =
-        type === 'entrainement' || type === 'scramble'
+        type === 'entrainement' || type === 'scramble' || partialLayout
           ? false
           : indexSet
             ? indexSet.has(player.id)
@@ -221,6 +227,12 @@ async function addPlayer(req, res) {
       });
     }
 
+    if (round.competition_id || round.type === 'competition') {
+      return res.status(400).json({
+        error: 'Sur une compétition, ajoute le joueur dans le squad, pas ici.',
+      });
+    }
+
     const { user_id } = req.body;
     if (!user_id) return res.status(400).json({ error: 'user_id requis' });
 
@@ -236,10 +248,12 @@ async function addPlayer(req, res) {
       return res.status(409).json({ error: 'Joueur déjà dans la partie' });
     }
 
+    const partial = Array.isArray(round.played_holes) && round.played_holes.length > 0 && round.played_holes.length < 18;
     const rp = await RoundPlayer.create({
       round_id: round.id,
       user_id,
       starting_index: user.index_value,
+      counts_for_index: !partial,
     });
 
     res.status(201).json({ roundPlayer: rp, message: 'Joueur ajouté' });
@@ -401,7 +415,17 @@ async function closeRound(req, res) {
       return res.status(400).json({ error: 'Partie déjà clôturée' });
     }
 
-    const parTotal = round.course.par_total;
+    const expected = Array.isArray(round.played_holes) && round.played_holes.length
+      ? round.played_holes.map(Number)
+      : null;
+    const expectedCount = expected ? expected.length : 18;
+    const holesData = Array.isArray(round.course?.holes_data) ? round.course.holes_data : [];
+    const parTotal = expected
+      ? expected.reduce((sum, n) => {
+          const found = holesData.find((h) => Number(h.hole) === n);
+          return sum + (Number(found?.par) || 4);
+        }, 0)
+      : round.course.par_total;
     const updates = [];
 
     for (const rp of round.players) {
@@ -434,10 +458,13 @@ async function closeRound(req, res) {
         continue;
       }
 
-      if (scores.length < 18) {
+      const playedCount = expected
+        ? scores.filter((hs) => expected.includes(Number(hs.hole_number))).length
+        : scores.length;
+      if (playedCount < expectedCount) {
         await t.rollback();
         return res.status(400).json({
-          error: `Le joueur ${rp.user.first_name} ${rp.user.last_name} n'a pas 18 trous saisis (${scores.length}/18). Marquez-le DNF s'il abandonne.`,
+          error: `Le joueur ${rp.user.first_name} ${rp.user.last_name} n'a pas ${expectedCount} trous saisis (${playedCount}/${expectedCount}). Marquez-le DNF s'il abandonne.`,
         });
       }
 
@@ -445,11 +472,15 @@ async function closeRound(req, res) {
       const scoreToPar = totalScore - parTotal;
       const netScore = Math.round((totalScore - Number(rp.starting_index)) * 10) / 10;
 
+      const partialLayout = Array.isArray(round.played_holes) && round.played_holes.length > 0 && round.played_holes.length < 18;
+      const isDoubles = /scramble|doublette|duo|mixte/i.test(String(round.name || ''));
       const isScramble = /scramble/i.test(String(round.name || ''));
       const isTraining =
         round.type === 'entrainement' ||
         rp.counts_for_index === false ||
-        isScramble;
+        isScramble ||
+        isDoubles ||
+        partialLayout;
       let change = 0;
       let newIndex = Number(rp.starting_index);
 
