@@ -380,7 +380,7 @@ async function addSquad(req, res) {
           user_id: userId,
           starting_index: user.index_value,
           counts_for_index:
-            !/scramble|doublette|duo|mixte/i.test(String(competition.name || '')) &&
+            !/scramble|doublette|duo|mixte|octobre rose/i.test(String(competition.name || '')) &&
             !(Array.isArray(competition.played_holes) && competition.played_holes.length > 0 && competition.played_holes.length < 18),
         },
         { transaction: t }
