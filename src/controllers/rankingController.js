@@ -214,6 +214,7 @@ async function getSeasonRanking(req, res) {
     // Grouper par compétition (ou par round si pas de competition_id)
     const events = new Map();
     for (const round of rounds) {
+      if (/octobre rose|scramble|marcassins/i.test(String(round.name || ''))) continue;
       const key = round.competition_id || `round:${round.id}`;
       if (!events.has(key)) events.set(key, []);
       for (const rp of round.players || []) {
