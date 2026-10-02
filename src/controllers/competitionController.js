@@ -957,8 +957,9 @@ async function composeSquads(req, res) {
     }
 
     // squads de 3 max (préférence et plafond)
-    const squadSize = Number(req.body.squad_size) || 3;
-    const maxSquadSize = Math.min(Number(req.body.max_squad_size) || 3, 3);
+    const isRose = /octobre rose/i.test(String(competition.name || ''));
+    const squadSize = isRose ? 2 : Number(req.body.squad_size) || 3;
+    const maxSquadSize = isRose ? 2 : Math.min(Number(req.body.max_squad_size) || 3, 4);
     const tolerance = Number(req.body.arrival_tolerance) || 20;
     const maxSameClub = Number(req.body.max_same_club) || 2;
     const interval = Number(req.body.interval_minutes) || 5;
@@ -1002,9 +1003,11 @@ async function composeSquads(req, res) {
     const createdSquads = [];
 
     async function createSquadRound(name, playerIds, startLabel) {
+      const roseName = /octobre rose/i.test(String(competition.name || ''));
+      const roundName = roseName && !/octobre rose/i.test(name) ? `Octobre Rose · ${name.trim()}` : name.trim();
       const round = await Round.create(
         {
-          name: name.trim(),
+          name: roundName,
           type: 'competition',
           course_id: competition.course_id,
           date: competition.date,
@@ -1024,7 +1027,7 @@ async function composeSquads(req, res) {
             user_id: userId,
             starting_index: user.index_value,
             counts_for_index:
-            !/scramble|doublette|duo|mixte/i.test(String(competition.name || '')) &&
+            !/scramble|doublette|duo|mixte|octobre rose/i.test(String(competition.name || '')) &&
             !(Array.isArray(competition.played_holes) && competition.played_holes.length > 0 && competition.played_holes.length < 18),
           },
           { transaction: t }
@@ -1056,8 +1059,8 @@ async function composeSquads(req, res) {
           let chunk = members.slice(i, i + squadSize);
           if (chunk.length < 2) break;
 
-          // Si 2 joueurs forcés : ajouter un 3e compatible (horaire ±, max même club)
-          if (chunk.length === 2) {
+          // Doublette Octobre Rose : on ne complète pas avec un 3e
+          if (chunk.length === 2 && squadSize > 2) {
             const free = pool.filter((p) => !assigned.has(p.user_id) && !p.forced_group);
             const times0 = chunk.map((m) => m.arrivalMin).filter((x) => x != null);
             const seedMin = times0.length ? Math.min(...times0) : null;
@@ -1101,8 +1104,10 @@ async function composeSquads(req, res) {
           const startMin = times.length ? Math.min(...times) : null;
           const startLabel = startMin != null ? minutesToTime(startMin) : '—';
           const filled = chunk.length === 3 && members.slice(i, i + squadSize).length === 2;
-          const squadName =
-            chunk.length === members.length || members.length <= squadSize
+          const rose = /octobre rose/i.test(String(competition.name || ''));
+          const squadName = rose
+            ? `Octobre Rose · ${chunk.map((c) => `${(c.name || '').split(' ').slice(-1)[0]}.${(c.name || ' ')[0]}`).join(' / ')}`
+            : chunk.length === members.length || members.length <= squadSize
               ? `Forcé ${label}${filled ? ' +1' : ''} · ${startLabel}`
               : `Forcé ${label} (${Math.floor(i / squadSize) + 1}) · ${startLabel}`;
           await createSquadRound(
