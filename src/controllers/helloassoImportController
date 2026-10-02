@@ -192,6 +192,11 @@ function normalizeRow(raw) {
     club_raw: String(findVal('club') || ''),
     arrival: String(findVal('horaires', 'arrivee', 'arrivée') || ''),
     order_ref: String(findVal('reference commande', 'référence commande') || ''),
+    partner_raw: String(
+      findVal('partenaire', 'binome', 'binôme', 'coequipier', 'coéquipier', 'invitee', 'invitée') ||
+      raw.__col_S ||
+      ''
+    ).trim(),
   };
 }
 
@@ -234,6 +239,10 @@ async function importHelloAsso(req, res) {
         const sheet = wb.Sheets[wb.SheetNames[0]];
         // raw:true → objets Date pour les cellules date (plus fiable que le texte localisé)
         rawRows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: true });
+        rawRows.forEach((row, i) => {
+          const cell = sheet[XLSX.utils.encode_cell({ r: i + 1, c: 18 })];
+          if (cell && cell.v != null && cell.v !== '') row.__col_S = cell.v;
+        });
       } catch (e) {
         return res.status(400).json({
           error:
@@ -366,8 +375,59 @@ async function importHelloAsso(req, res) {
         user_id: existing ? existing.id : null,
         _emailForCreate: emailToUse,
         _club_id: club ? club.id : null,
+        partner_raw: r.partner_raw || '',
+        pair: r.ticket || r.order_ref || rowKey(r),
       });
     }
+
+    function splitPerson(value) {
+      const s = String(value || '').replace(/\s+/g, ' ').trim();
+      if (!s || s.length < 2) return null;
+      const parts = s.split(' ');
+      if (parts.length === 1) return { last_name: parts[0], first_name: 'Invitee' };
+      const firstIsSurname = parts[0] === parts[0].toUpperCase() && parts[0].length > 1;
+      if (firstIsSurname) return { last_name: parts[0], first_name: parts.slice(1).join(' ') };
+      return { last_name: parts[parts.length - 1], first_name: parts.slice(0, -1).join(' ') };
+    }
+
+    const extras = [];
+    for (const p of preview) {
+      const person = splitPerson(p.partner_raw);
+      if (!person) continue;
+      const key = rowKey(person);
+      const already = preview.find((x) => rowKey(x) === key) || extras.find((x) => rowKey(x) === key);
+      const found =
+        byName.get(key) ||
+        existingUsers.find(
+          (u) => norm(u.last_name) === norm(person.last_name) && norm(u.first_name) === norm(person.first_name)
+        ) ||
+        null;
+      if (already) {
+        p.pair = already.pair || p.pair;
+        continue;
+      }
+      extras.push({
+        action: found ? 'exists' : 'create',
+        guest: !found,
+        keep_existing: !!found,
+        ticket: p.ticket,
+        first_name: person.first_name,
+        last_name: person.last_name,
+        email: found ? found.email : `invite.${norm(p.pair)}.${norm(person.last_name)}@ssfg.local`,
+        club_code: '',
+        birth_date: null,
+        arrival: p.arrival,
+        note: found
+          ? 'Binôme déjà en base — fiche non modifiée'
+          : 'Invitée occasionnelle (colonne partenaire) — fiche provisoire',
+        user_id: found ? found.id : null,
+        _emailForCreate: found ? found.email : `invite.${norm(p.pair)}.${norm(person.last_name)}@ssfg.local`,
+        _club_id: null,
+        pair: p.pair,
+        gender: 'F',
+      });
+    }
+    preview.push(...extras);
 
     if (dry_run) {
       return res.json({
@@ -384,6 +444,10 @@ async function importHelloAsso(req, res) {
 
     for (const p of preview) {
       if (p.action === 'exists') {
+        if (p.keep_existing || p.guest) {
+          linked.push({ id: p.user_id, name: `${p.last_name} ${p.first_name}`, note: 'fiche conservée' });
+          continue;
+        }
         // MAJ club / naissance si vide
         const u = await User.findByPk(p.user_id);
         if (u) {
@@ -422,6 +486,7 @@ async function importHelloAsso(req, res) {
         birth_date: p.birth_date || null,
         club_id: p._club_id || null,
         index_value: 1.0,
+        gender: p.gender || null,
         must_change_password: true,
         is_active: true,
       });
@@ -510,12 +575,16 @@ async function importHelloAsso(req, res) {
         return res.status(404).json({ error: 'Compétition non trouvée' });
       }
     } else {
+      const holes = Array.isArray(req.body.played_holes)
+        ? req.body.played_holes.map(Number).filter((n) => n >= 1 && n <= 18)
+        : null;
       competition = await Competition.create({
         name: String(name).trim(),
         course_id,
         date,
         status: 'open',
         created_by: req.user.id,
+        played_holes: holes && holes.length ? holes : null,
       });
     }
 
@@ -532,8 +601,12 @@ async function importHelloAsso(req, res) {
           user_id: uid,
           arrival_time: arrival,
           ticket: p.ticket || null,
+          forced_group: p.pair ? `duo-${p.pair}` : null,
         },
       });
+      if (p.pair) {
+        await reg.update({ forced_group: `duo-${p.pair}` });
+      }
       if (!wasCreated && arrival) {
         await reg.update({
           arrival_time: arrival,
