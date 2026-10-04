@@ -263,11 +263,36 @@ async function getCompetition(req, res) {
       return a.total_strokes - b.total_strokes;
     });
 
+    let team_leaderboard = null;
+    if (/octobre rose/i.test(String(competition.name || ''))) {
+      const teams = [];
+      for (const squad of competition.squads || []) {
+        const players = squad.players || [];
+        for (let i = 0; i < players.length; i += 2) {
+          const pair = players.slice(i, i + 2);
+          if (!pair.length) continue;
+          const lead = leaderboard.find((r) => r.user_id === pair[0].user_id);
+          if (!lead) continue;
+          teams.push({
+            ...lead,
+            team: pair.map((p) => `${p.user?.last_name || ''} ${(p.user?.first_name || ' ')[0]}.`).join(' / '),
+            squad_name: squad.name,
+          });
+        }
+      }
+      teams.sort((a, b) => {
+        if (b.holes_played !== a.holes_played) return b.holes_played - a.holes_played;
+        return (a.to_par ?? 99) - (b.to_par ?? 99);
+      });
+      team_leaderboard = teams;
+    }
+
     const palmares = buildPalmares(leaderboard, competition);
     const compJson = typeof competition.toJSON === 'function' ? competition.toJSON() : competition;
     res.json({
-      competition: { ...compJson, leaderboard, palmares },
+      competition: { ...compJson, leaderboard, team_leaderboard, palmares },
       leaderboard,
+      team_leaderboard,
       palmares,
     });
   } catch (err) {
@@ -893,7 +918,17 @@ async function setForcedGroups(req, res) {
       return res.status(400).json({ error: 'Compétition clôturée' });
     }
 
-    if (Array.isArray(req.body.groups)) {
+    if (req.body.wave && Array.isArray(req.body.user_ids)) {
+      const wave = String(req.body.wave).trim() || 'A';
+      for (const uid of req.body.user_ids) {
+        const reg = await CompetitionRegistration.findOne({
+          where: { competition_id: competitionId, user_id: uid },
+        });
+        if (!reg) continue;
+        const base = String(reg.forced_group || `duo-manual-${uid}`).split('|')[0];
+        await reg.update({ forced_group: `${base}|wave-${wave}` });
+      }
+    } else if (Array.isArray(req.body.groups)) {
       // reset all forced groups for this competition first for listed users
       for (const g of req.body.groups) {
         const label = String(g.label || g.forced_group || '').trim() || null;
@@ -1001,6 +1036,61 @@ async function composeSquads(req, res) {
       }));
 
     const createdSquads = [];
+
+    if (isRose) {
+      const pairs = new Map();
+      const loose = [];
+      for (const p of pool) {
+        const raw = p.forced_group || '';
+        const duo = raw.startsWith('duo-') ? raw.split('|')[0] : '';
+        const wave = raw.includes('|wave-') ? raw.split('|wave-')[1] : '';
+        if (!duo) {
+          loose.push(p);
+          continue;
+        }
+        if (!pairs.has(duo)) pairs.set(duo, { id: duo, wave, players: [] });
+        pairs.get(duo).players.push(p);
+        if (wave) pairs.get(duo).wave = wave;
+      }
+      for (let i = 0; i + 1 < loose.length; i += 2) {
+        pairs.set(`duo-auto-${i}`, { id: `duo-auto-${i}`, wave: '', players: [loose[i], loose[i + 1]] });
+      }
+      const units = [...pairs.values()].filter((u) => u.players.length >= 2);
+      const byWave = new Map();
+      const free = [];
+      for (const u of units) {
+        if (u.wave) {
+          if (!byWave.has(u.wave)) byWave.set(u.wave, []);
+          byWave.get(u.wave).push(u);
+        } else free.push(u);
+      }
+      async function emit(list, label) {
+        const ids = list.flatMap((u) => u.players.slice(0, 2).map((p) => p.user_id));
+        const title = list
+          .map((u) => u.players.slice(0, 2).map((p) => (p.name || '').split(' ')[0]).join('/'))
+          .join(' + ');
+        await createSquadRound(`Octobre Rose · ${label} · ${title}`, ids, '—');
+      }
+      for (const [wave, list] of byWave) {
+        for (let i = 0; i < list.length; i += 3) await emit(list.slice(i, i + 3), `Forcé ${wave}`);
+      }
+      let i = 0;
+      if (free.length % 2 === 1 && free.length >= 3) {
+        await emit(free.slice(0, 3), `Squad ${createdSquads.length + 1}`);
+        i = 3;
+      }
+      for (; i + 1 < free.length; i += 2) {
+        await emit(free.slice(i, i + 2), `Squad ${createdSquads.length + 1}`);
+      }
+      const used = new Set();
+      for (const s of createdSquads) (s.player_ids || []).forEach((id) => used.add(id));
+      await t.commit();
+      return res.status(201).json({
+        message: `${createdSquads.length} squad(s) de doublettes créé(s)`,
+        squads: createdSquads,
+        unassigned: pool.filter((p) => !used.has(p.user_id)).map((p) => ({ user_id: p.user_id, name: p.name })),
+      });
+    }
 
     async function createSquadRound(name, playerIds, startLabel) {
       const roseName = /octobre rose/i.test(String(competition.name || ''));
