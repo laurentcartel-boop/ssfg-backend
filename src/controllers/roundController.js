@@ -79,6 +79,7 @@ async function getRound(req, res) {
             { model: User, as: 'user', attributes: ['id', 'first_name', 'last_name', 'index_value', 'gender'] },
             { model: HoleScore, as: 'holeScores' },
           ],
+          order: [['created_at', 'ASC']],
         },
       ],
     });
