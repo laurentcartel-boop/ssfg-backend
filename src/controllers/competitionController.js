@@ -263,36 +263,11 @@ async function getCompetition(req, res) {
       return a.total_strokes - b.total_strokes;
     });
 
-    let team_leaderboard = null;
-    if (/octobre rose/i.test(String(competition.name || ''))) {
-      const teams = [];
-      for (const squad of competition.squads || []) {
-        const players = squad.players || [];
-        for (let i = 0; i < players.length; i += 2) {
-          const pair = players.slice(i, i + 2);
-          if (!pair.length) continue;
-          const lead = leaderboard.find((r) => r.user_id === pair[0].user_id);
-          if (!lead) continue;
-          teams.push({
-            ...lead,
-            team: pair.map((p) => `${p.user?.last_name || ''} ${(p.user?.first_name || ' ')[0]}.`).join(' / '),
-            squad_name: squad.name,
-          });
-        }
-      }
-      teams.sort((a, b) => {
-        if (b.holes_played !== a.holes_played) return b.holes_played - a.holes_played;
-        return (a.to_par ?? 99) - (b.to_par ?? 99);
-      });
-      team_leaderboard = teams;
-    }
-
     const palmares = buildPalmares(leaderboard, competition);
     const compJson = typeof competition.toJSON === 'function' ? competition.toJSON() : competition;
     res.json({
-      competition: { ...compJson, leaderboard, team_leaderboard, palmares },
+      competition: { ...compJson, leaderboard, palmares },
       leaderboard,
-      team_leaderboard,
       palmares,
     });
   } catch (err) {
@@ -308,7 +283,7 @@ async function getCompetition(req, res) {
  */
 async function createCompetition(req, res) {
   try {
-    let { name, course_id, date, scope_type = 'open', club_id = null, played_holes = null } = req.body;
+    let { name, course_id, date, scope_type = 'open', club_id = null } = req.body;
     if (!name || !course_id || !date) {
       return res.status(400).json({ error: 'name, course_id et date sont obligatoires' });
     }
@@ -331,10 +306,6 @@ async function createCompetition(req, res) {
     const course = await Course.findByPk(course_id);
     if (!course) return res.status(404).json({ error: 'Parcours non trouvé' });
 
-    const holes = Array.isArray(played_holes)
-      ? played_holes.map(Number).filter((n) => n >= 1 && n <= 18)
-      : null;
-
     const competition = await Competition.create({
       name: name.trim(),
       course_id,
@@ -343,7 +314,6 @@ async function createCompetition(req, res) {
       created_by: req.user.id,
       scope_type: scope,
       club_id: scope === 'club' ? club_id : null,
-      played_holes: holes && holes.length ? holes : null,
     });
 
     res.status(201).json({ competition, message: 'Compétition créée' });
@@ -391,7 +361,6 @@ async function addSquad(req, res) {
         status: competition.launched_at ? 'in_progress' : 'draft',
         created_by: req.user.id,
         competition_id: competition.id,
-        played_holes: competition.played_holes || null,
       },
       { transaction: t }
     );
@@ -404,9 +373,7 @@ async function addSquad(req, res) {
           round_id: round.id,
           user_id: userId,
           starting_index: user.index_value,
-          counts_for_index:
-            !/scramble|doublette|duo|mixte|octobre rose/i.test(String(competition.name || '')) &&
-            !(Array.isArray(competition.played_holes) && competition.played_holes.length > 0 && competition.played_holes.length < 18),
+          counts_for_index: !/scramble/i.test(String(competition.name || '')),
         },
         { transaction: t }
       );
@@ -918,17 +885,7 @@ async function setForcedGroups(req, res) {
       return res.status(400).json({ error: 'Compétition clôturée' });
     }
 
-    if (req.body.wave && Array.isArray(req.body.user_ids)) {
-      const wave = String(req.body.wave).trim() || 'A';
-      for (const uid of req.body.user_ids) {
-        const reg = await CompetitionRegistration.findOne({
-          where: { competition_id: competitionId, user_id: uid },
-        });
-        if (!reg) continue;
-        const base = String(reg.forced_group || `duo-manual-${uid}`).split('|')[0];
-        await reg.update({ forced_group: `${base}|wave-${wave}` });
-      }
-    } else if (Array.isArray(req.body.groups)) {
+    if (Array.isArray(req.body.groups)) {
       // reset all forced groups for this competition first for listed users
       for (const g of req.body.groups) {
         const label = String(g.label || g.forced_group || '').trim() || null;
@@ -992,9 +949,8 @@ async function composeSquads(req, res) {
     }
 
     // squads de 3 max (préférence et plafond)
-    const isRose = /octobre rose/i.test(String(competition.name || ''));
-    const squadSize = isRose ? 2 : Number(req.body.squad_size) || 3;
-    const maxSquadSize = isRose ? 2 : Math.min(Number(req.body.max_squad_size) || 3, 4);
+    const squadSize = Number(req.body.squad_size) || 3;
+    const maxSquadSize = Math.min(Number(req.body.max_squad_size) || 3, 3);
     const tolerance = Number(req.body.arrival_tolerance) || 20;
     const maxSameClub = Number(req.body.max_same_club) || 2;
     const interval = Number(req.body.interval_minutes) || 5;
@@ -1037,74 +993,16 @@ async function composeSquads(req, res) {
 
     const createdSquads = [];
 
-    if (isRose) {
-      const pairs = new Map();
-      const loose = [];
-      for (const p of pool) {
-        const raw = p.forced_group || '';
-        const duo = raw.startsWith('duo-') ? raw.split('|')[0] : '';
-        const wave = raw.includes('|wave-') ? raw.split('|wave-')[1] : '';
-        if (!duo) {
-          loose.push(p);
-          continue;
-        }
-        if (!pairs.has(duo)) pairs.set(duo, { id: duo, wave, players: [] });
-        pairs.get(duo).players.push(p);
-        if (wave) pairs.get(duo).wave = wave;
-      }
-      for (let i = 0; i + 1 < loose.length; i += 2) {
-        pairs.set(`duo-auto-${i}`, { id: `duo-auto-${i}`, wave: '', players: [loose[i], loose[i + 1]] });
-      }
-      const units = [...pairs.values()].filter((u) => u.players.length >= 2);
-      const byWave = new Map();
-      const free = [];
-      for (const u of units) {
-        if (u.wave) {
-          if (!byWave.has(u.wave)) byWave.set(u.wave, []);
-          byWave.get(u.wave).push(u);
-        } else free.push(u);
-      }
-      async function emit(list, label) {
-        const ids = list.flatMap((u) => u.players.slice(0, 2).map((p) => p.user_id));
-        const title = list
-          .map((u) => u.players.slice(0, 2).map((p) => (p.name || '').split(' ')[0]).join('/'))
-          .join(' + ');
-        await createSquadRound(`Octobre Rose · ${label} · ${title}`, ids, '—');
-      }
-      for (const [wave, list] of byWave) {
-        for (let i = 0; i < list.length; i += 3) await emit(list.slice(i, i + 3), `Forcé ${wave}`);
-      }
-      let i = 0;
-      if (free.length % 2 === 1 && free.length >= 3) {
-        await emit(free.slice(0, 3), `Squad ${createdSquads.length + 1}`);
-        i = 3;
-      }
-      for (; i + 1 < free.length; i += 2) {
-        await emit(free.slice(i, i + 2), `Squad ${createdSquads.length + 1}`);
-      }
-      const used = new Set();
-      for (const s of createdSquads) (s.player_ids || []).forEach((id) => used.add(id));
-      await t.commit();
-      return res.status(201).json({
-        message: `${createdSquads.length} squad(s) de doublettes créé(s)`,
-        squads: createdSquads,
-        unassigned: pool.filter((p) => !used.has(p.user_id)).map((p) => ({ user_id: p.user_id, name: p.name })),
-      });
-    }
-
     async function createSquadRound(name, playerIds, startLabel) {
-      const roseName = /octobre rose/i.test(String(competition.name || ''));
-      const roundName = roseName && !/octobre rose/i.test(name) ? `Octobre Rose · ${name.trim()}` : name.trim();
       const round = await Round.create(
         {
-          name: roundName,
+          name: name.trim(),
           type: 'competition',
           course_id: competition.course_id,
           date: competition.date,
           status: competition.launched_at ? 'in_progress' : 'draft',
           created_by: req.user.id,
           competition_id: competition.id,
-          played_holes: competition.played_holes || null,
         },
         { transaction: t }
       );
@@ -1116,9 +1014,7 @@ async function composeSquads(req, res) {
             round_id: round.id,
             user_id: userId,
             starting_index: user.index_value,
-            counts_for_index:
-            !/scramble|doublette|duo|mixte|octobre rose/i.test(String(competition.name || '')) &&
-            !(Array.isArray(competition.played_holes) && competition.played_holes.length > 0 && competition.played_holes.length < 18),
+            counts_for_index: !/scramble/i.test(String(competition.name || '')),
           },
           { transaction: t }
         );
@@ -1149,8 +1045,8 @@ async function composeSquads(req, res) {
           let chunk = members.slice(i, i + squadSize);
           if (chunk.length < 2) break;
 
-          // Doublette Octobre Rose : on ne complète pas avec un 3e
-          if (chunk.length === 2 && squadSize > 2) {
+          // Si 2 joueurs forcés : ajouter un 3e compatible (horaire ±, max même club)
+          if (chunk.length === 2) {
             const free = pool.filter((p) => !assigned.has(p.user_id) && !p.forced_group);
             const times0 = chunk.map((m) => m.arrivalMin).filter((x) => x != null);
             const seedMin = times0.length ? Math.min(...times0) : null;
@@ -1194,10 +1090,8 @@ async function composeSquads(req, res) {
           const startMin = times.length ? Math.min(...times) : null;
           const startLabel = startMin != null ? minutesToTime(startMin) : '—';
           const filled = chunk.length === 3 && members.slice(i, i + squadSize).length === 2;
-          const rose = /octobre rose/i.test(String(competition.name || ''));
-          const squadName = rose
-            ? `Octobre Rose · ${chunk.map((c) => `${(c.name || '').split(' ').slice(-1)[0]}.${(c.name || ' ')[0]}`).join(' / ')}`
-            : chunk.length === members.length || members.length <= squadSize
+          const squadName =
+            chunk.length === members.length || members.length <= squadSize
               ? `Forcé ${label}${filled ? ' +1' : ''} · ${startLabel}`
               : `Forcé ${label} (${Math.floor(i / squadSize) + 1}) · ${startLabel}`;
           await createSquadRound(
@@ -1304,4 +1198,3 @@ async function composeSquads(req, res) {
     res.status(500).json({ error: 'Erreur serveur', detail: err.message });
   }
 }
-
